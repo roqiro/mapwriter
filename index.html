@@ -16,8 +16,8 @@
     <script src="https://unpkg.com/lucide@latest"></script>
 
     <style>
-        body, html { height: 100%; margin: 0; overflow: hidden; background: #000; }
-        #map { height: 100%; width: 100%; z-index: 1; touch-action: none; }
+        body, html { height: 100%; margin: 0; overflow: hidden; background: #000; overscroll-behavior: none; }
+        #map { height: 100%; width: 100%; z-index: 1; touch-action: none; outline: none; -webkit-tap-highlight-color: transparent; }
         .canvas-overlay {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -29,36 +29,59 @@
         .leaflet-control-attribution { display: none !important; }
         .modal-enter { animation: modalFadeIn 0.2s ease-out; }
         @keyframes modalFadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
-        button { cursor: pointer; }
+        button { cursor: pointer; touch-action: manipulation; }
+        
+        /* カスタムピン用スタイル */
+        .custom-pin { background: transparent; border: none; }
+        .star-btn.active svg { fill: #fbbf24; color: #fbbf24; }
+        
+        /* ツールバーの横スクロール対応（画面が狭い場合） */
+        .toolbar-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .toolbar-scroll::-webkit-scrollbar { display: none; }
     </style>
 </head>
 <body class="bg-gray-100">
 
     <div class="ui-panel fixed top-0 left-4 right-4 flex flex-col gap-2 pointer-events-none mt-4">
         <div class="flex justify-between items-start">
-            <div class="flex flex-col gap-2 pointer-events-auto">
-                <div class="bg-white/90 backdrop-blur-md p-2 rounded-2xl shadow-xl flex gap-1 md:gap-2 border border-white/20">
-                    <button id="btn-move" class="p-3 rounded-xl bg-blue-500 text-white shadow-sm transition-all active:scale-90" title="移動">
+            <div class="flex flex-col gap-2 pointer-events-auto max-w-full">
+                <div class="bg-white/90 backdrop-blur-md p-2 rounded-2xl shadow-xl flex gap-1 md:gap-2 border border-white/20 toolbar-scroll">
+                    <button id="btn-move" class="p-3 rounded-xl bg-blue-500 text-white shadow-sm transition-all active:scale-90 flex-shrink-0" title="移動">
                         <i data-lucide="move"></i>
                     </button>
-                    <button id="btn-draw" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90" title="手書きモード">
-                        <i data-lucide="pencil"></i>
+                    
+                    <div class="w-px bg-gray-200 mx-1 flex-shrink-0"></div>
+
+                    <!-- ペンツール群 -->
+                    <button id="btn-draw-blue" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90 flex-shrink-0" title="青ペン">
+                        <i data-lucide="pencil" class="text-blue-600"></i>
                     </button>
-                    <button id="btn-marker" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90" title="ピンを立てる">
+                    <button id="btn-draw-red" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90 flex-shrink-0" title="赤ペン">
+                        <i data-lucide="pencil" class="text-red-500"></i>
+                    </button>
+                    <button id="btn-eraser" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90 flex-shrink-0" title="消しゴム (タップして削除)">
+                        <i data-lucide="eraser"></i>
+                    </button>
+
+                    <div class="w-px bg-gray-200 mx-1 flex-shrink-0"></div>
+
+                    <button id="btn-marker" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90 flex-shrink-0" title="ピンを立てる">
                         <i data-lucide="map-pin"></i>
                     </button>
-                    <div class="w-px bg-gray-200 mx-1"></div>
-                    <button id="btn-undo" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90" title="元に戻す">
+                    
+                    <div class="w-px bg-gray-200 mx-1 flex-shrink-0"></div>
+                    
+                    <button id="btn-undo" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90 flex-shrink-0" title="元に戻す">
                         <i data-lucide="undo-2"></i>
                     </button>
-                    <button id="btn-config" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90" title="クラウド同期・設定">
+                    <button id="btn-config" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90 flex-shrink-0" title="クラウド同期・設定">
                         <i data-lucide="shield-check" class="text-green-600"></i>
                     </button>
                 </div>
             </div>
-            <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-xl flex items-center p-1 pointer-events-auto w-48 md:w-80 border border-white/20">
-                <input type="text" id="search-input" placeholder="駅、住所を検索..." class="flex-1 px-4 py-2 bg-transparent outline-none text-sm">
-                <button id="btn-search" class="p-2 text-gray-500 hover:text-blue-500"><i data-lucide="search"></i></button>
+            <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-xl flex items-center p-1 pointer-events-auto w-48 md:w-80 border border-white/20 ml-2">
+                <input type="text" id="search-input" placeholder="駅、住所を検索..." class="flex-1 px-4 py-2 bg-transparent outline-none text-sm min-w-0">
+                <button id="btn-search" class="p-2 text-gray-500 hover:text-blue-500 flex-shrink-0"><i data-lucide="search"></i></button>
             </div>
         </div>
     </div>
@@ -72,6 +95,18 @@
             <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-gray-800"><i data-lucide="home" class="text-blue-500"></i> 物件登録</h3>
             <div class="space-y-4">
                 <input type="text" id="prop-name" class="w-full px-4 py-3 bg-gray-50 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="物件名 / メモ">
+                
+                <div class="flex flex-col gap-2">
+                    <label class="text-xs font-bold text-gray-500 ml-1">お気に入り度 (色が変わります)</label>
+                    <div class="flex justify-between bg-gray-50 p-2 rounded-xl" id="star-container">
+                        <button type="button" class="star-btn p-2 text-gray-300 transition-colors" data-rating="1"><i data-lucide="star"></i></button>
+                        <button type="button" class="star-btn p-2 text-gray-300 transition-colors" data-rating="2"><i data-lucide="star"></i></button>
+                        <button type="button" class="star-btn p-2 text-gray-300 transition-colors" data-rating="3"><i data-lucide="star"></i></button>
+                        <button type="button" class="star-btn p-2 text-gray-300 transition-colors" data-rating="4"><i data-lucide="star"></i></button>
+                        <button type="button" class="star-btn p-2 text-gray-300 transition-colors" data-rating="5"><i data-lucide="star"></i></button>
+                    </div>
+                </div>
+
                 <input type="url" id="prop-url" class="w-full px-4 py-3 bg-gray-50 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="URL (https://...)">
                 <div class="flex gap-2 pt-2">
                     <button id="btn-save-prop" class="flex-1 bg-blue-500 text-white py-4 rounded-xl font-bold shadow-lg shadow-blue-200 active:scale-95 transition-transform">保存</button>
@@ -102,7 +137,6 @@
                     <button onclick="document.getElementById('import-file').click()" class="py-3 rounded-xl border text-sm font-medium bg-white">読込</button>
                     <input type="file" id="import-file" class="hidden" accept=".json">
                 </div>
-                <!-- エラーの原因となっていた、欠落していたボタンを追加 -->
                 <button id="btn-clear-all" class="w-full text-red-500 text-sm font-medium py-2">すべてのデータを消去</button>
                 <button id="btn-close-config" class="w-full bg-gray-100 py-4 rounded-xl font-bold">閉じる</button>
             </div>
@@ -122,11 +156,13 @@
         const STORAGE_KEY = 'secure_property_map_v3';
         let map, canvas, ctx, db, auth;
         let mode = 'move';
+        let currentColor = '#3b82f6'; // デフォルト青
         let isDrawing = false;
         let currentPath = [];
         let drawings = [];
         let markers = [];
         let pendingLatLng = null;
+        let currentRating = 3;
 
         const getFirebaseConfig = () => {
             if (typeof __firebase_config !== 'undefined' && __firebase_config) return JSON.parse(__firebase_config);
@@ -165,7 +201,6 @@
         }
 
         async function init() {
-            // DOMが読み込まれてから設定を行う
             setupUI();
 
             try {
@@ -179,7 +214,14 @@
                 }
             } catch (e) { console.warn("Firebase initialization skipped."); }
 
-            map = L.map('map', { zoomControl: false, tap: false, attributionControl: false, touchZoom: true, bounceAtZoomLimits: false }).setView([35.6812, 139.7671], 13);
+            map = L.map('map', { 
+                zoomControl: false, 
+                tap: false, 
+                attributionControl: false, 
+                touchZoom: true, 
+                bounceAtZoomLimits: false 
+            }).setView([35.6812, 139.7671], 13);
+            
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
             L.control.zoom({ position: 'bottomright' }).addTo(map);
 
@@ -193,47 +235,78 @@
             map.on('mousedown touchstart', (e) => {
                 if (mode !== 'draw') return;
                 if (e.originalEvent.touches && e.originalEvent.touches.length > 1) return;
+                
+                if (e.originalEvent.cancelable) e.originalEvent.preventDefault();
+                if (e.originalEvent.stopPropagation) e.originalEvent.stopPropagation();
+
                 isDrawing = true;
                 currentPath = [e.latlng];
-                map.dragging.disable();
-                map.touchZoom.disable();
-                if (e.originalEvent.stopPropagation) e.originalEvent.stopPropagation();
             });
 
             map.on('mousemove touchmove', (e) => {
                 if (!isDrawing || mode !== 'draw') return;
-                if (e.originalEvent.preventDefault) e.originalEvent.preventDefault();
+                
+                if (e.originalEvent.cancelable) e.originalEvent.preventDefault();
+                if (e.originalEvent.stopPropagation) e.originalEvent.stopPropagation();
+
                 currentPath.push(e.latlng);
                 drawTempPath();
             });
 
             map.on('mouseup touchend', (e) => {
-                if (mode === 'draw') {
-                    if (isDrawing && currentPath.length > 1) {
-                        const polyline = L.polyline(currentPath, { color: '#3b82f6', weight: getWeightForZoom(), opacity: 0.8, lineJoin: 'round', lineCap: 'round' }).addTo(map);
-                        drawings.push(polyline);
+                if (mode === 'draw' && isDrawing) {
+                    if (currentPath.length > 1) {
+                        createPolyline(currentPath, currentColor);
                         saveToLocal();
                     }
                     isDrawing = false;
                     clearCanvas();
-                    map.dragging.enable();
-                    map.touchZoom.enable();
                 }
             });
 
             map.on('zoomend', () => {
                 const newWeight = getWeightForZoom();
-                drawings.forEach(d => d.setStyle({ weight: newWeight }));
+                drawings.forEach(d => d.instance.setStyle({ weight: newWeight }));
             });
 
             map.on('click', (e) => {
                 if (mode === 'marker') {
                     pendingLatLng = e.latlng;
+                    resetRating(); 
                     document.getElementById('property-modal').classList.remove('hidden');
                 }
             });
             
             lucide.createIcons();
+            setMode('move'); // 初期モード
+        }
+
+        function createPolyline(path, color) {
+            const polyline = L.polyline(path, { 
+                color: color, 
+                weight: getWeightForZoom(), 
+                opacity: 0.8, 
+                lineJoin: 'round', 
+                lineCap: 'round',
+                className: 'drawable-path' // クラスを追加して識別しやすく
+            }).addTo(map);
+
+            // 消しゴム機能：クリック（タップ）で削除
+            polyline.on('click', (e) => {
+                if (mode === 'eraser') {
+                    L.DomEvent.stopPropagation(e); // 地図へのクリック伝播を防ぐ
+                    removeDrawing(polyline);
+                }
+            });
+
+            drawings.push({ instance: polyline, color: color });
+            return polyline;
+        }
+
+        function removeDrawing(polylineInstance) {
+            map.removeLayer(polylineInstance);
+            drawings = drawings.filter(d => d.instance !== polylineInstance);
+            saveToLocal();
         }
 
         function resizeCanvas() { if (canvas) { canvas.width = window.innerWidth; canvas.height = window.innerHeight; } }
@@ -241,7 +314,9 @@
         function setupUI() {
             const elements = {
                 'btn-move': () => setMode('move'),
-                'btn-draw': () => setMode('draw'),
+                'btn-draw-blue': () => setMode('draw', '#3b82f6'),
+                'btn-draw-red': () => setMode('draw', '#ef4444'),
+                'btn-eraser': () => setMode('eraser'),
                 'btn-marker': () => setMode('marker'),
                 'btn-undo': undoLastAction,
                 'btn-config': () => document.getElementById('config-modal').classList.remove('hidden'),
@@ -260,6 +335,13 @@
                 if (el) el.onclick = action;
             }
 
+            document.querySelectorAll('.star-btn').forEach(btn => {
+                btn.onclick = (e) => {
+                    const r = parseInt(e.currentTarget.dataset.rating);
+                    setRating(r);
+                };
+            });
+
             const importFile = document.getElementById('import-file');
             if (importFile) {
                 importFile.onchange = (e) => {
@@ -272,22 +354,91 @@
             }
         }
 
-        function setMode(m) {
+        function setRating(r) {
+            currentRating = r;
+            document.querySelectorAll('.star-btn').forEach(btn => {
+                const btnR = parseInt(btn.dataset.rating);
+                if (btnR <= r) btn.classList.add('active');
+                else btn.classList.remove('active');
+            });
+        }
+
+        function resetRating() { setRating(3); }
+
+        function setMode(m, color = null) {
             mode = m;
-            ['btn-move', 'btn-draw', 'btn-marker'].forEach(id => {
+            if (color) currentColor = color;
+
+            // ボタンのアクティブ状態リセット
+            const btns = ['btn-move', 'btn-draw-blue', 'btn-draw-red', 'btn-eraser', 'btn-marker'];
+            btns.forEach(id => {
                 const btn = document.getElementById(id);
                 if (!btn) return;
-                const active = id === `btn-${m}`;
-                btn.classList.toggle('bg-blue-500', active); btn.classList.toggle('text-white', active);
-                btn.classList.toggle('bg-white', !active); btn.classList.toggle('text-gray-700', !active);
+                
+                // 現在のモードとIDが一致するか、または描画モードの場合は色もチェック
+                let isActive = false;
+                if (m === 'draw') {
+                    if (id === 'btn-draw-blue' && currentColor === '#3b82f6') isActive = true;
+                    if (id === 'btn-draw-red' && currentColor === '#ef4444') isActive = true;
+                } else if (id === `btn-${m}`) {
+                    isActive = true;
+                }
+
+                if (isActive) {
+                    btn.classList.add('bg-blue-500', 'text-white');
+                    btn.classList.remove('bg-white', 'text-gray-700');
+                    // 赤ペンの場合だけ背景を赤にするなどの調整も可能だが、統一感のため青背景（アクティブ）とする
+                    if (id === 'btn-draw-red') {
+                        btn.classList.remove('bg-blue-500');
+                        btn.classList.add('bg-red-500');
+                    }
+                    if (id === 'btn-eraser') {
+                        btn.classList.remove('bg-blue-500');
+                        btn.classList.add('bg-gray-700');
+                    }
+                } else {
+                    btn.classList.remove('bg-blue-500', 'bg-red-500', 'bg-gray-700', 'text-white');
+                    btn.classList.add('bg-white', 'text-gray-700');
+                }
             });
-            map.dragging.enable(); map.touchZoom.enable();
+
+            // 地図操作のロック制御
+            if (mode === 'draw') {
+                disableMapInteraction();
+                document.getElementById('map').style.cursor = 'crosshair';
+            } else if (mode === 'eraser') {
+                enableMapInteraction(); // 消しゴムモードは移動しながら探せるように移動許可
+                document.getElementById('map').style.cursor = 'not-allowed'; // 消しゴムっぽいカーソル表現
+            } else {
+                enableMapInteraction();
+                document.getElementById('map').style.cursor = 'grab';
+            }
+        }
+
+        function disableMapInteraction() {
+            map.dragging.disable();
+            map.touchZoom.disable();
+            map.doubleClickZoom.disable();
+            map.scrollWheelZoom.disable();
+            map.boxZoom.disable();
+            map.keyboard.disable();
+            if (map.tap) map.tap.disable();
+        }
+
+        function enableMapInteraction() {
+            map.dragging.enable();
+            map.touchZoom.enable();
+            map.doubleClickZoom.enable();
+            map.scrollWheelZoom.enable();
+            map.boxZoom.enable();
+            map.keyboard.enable();
+            if (map.tap) map.tap.enable();
         }
 
         function drawTempPath() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             if (currentPath.length < 2) return;
-            ctx.beginPath(); ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = getWeightForZoom(); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+            ctx.beginPath(); ctx.strokeStyle = currentColor; ctx.lineWidth = getWeightForZoom(); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
             const start = map.latLngToContainerPoint(currentPath[0]);
             ctx.moveTo(start.x, start.y);
             for (let i = 1; i < currentPath.length; i++) {
@@ -303,8 +454,8 @@
             const name = document.getElementById('prop-name').value || '無題の物件';
             const url = document.getElementById('prop-url').value;
             if (pendingLatLng) {
-                const marker = createMarker(pendingLatLng, name, url);
-                markers.push({ latlng: pendingLatLng, name, url, instance: marker });
+                const marker = createMarker(pendingLatLng, name, url, currentRating);
+                markers.push({ latlng: pendingLatLng, name, url, rating: currentRating, instance: marker });
                 saveToLocal();
             }
             document.getElementById('property-modal').classList.add('hidden');
@@ -312,10 +463,31 @@
             setMode('move');
         }
 
-        function createMarker(latlng, name, url) {
-            const popup = `<div class="p-2 min-w-[150px]"><h4 class="font-bold text-gray-800 border-b pb-1 mb-2">${name}</h4>${url ? `<a href="${url}" target="_blank" class="text-blue-500 text-sm">物件詳細</a>` : '<p class="text-xs">URLなし</p>'}<button onclick="window.removeAt('${latlng.lat}', '${latlng.lng}')" class="mt-4 text-red-400 text-xs">削除</button></div>`;
-            const m = L.marker(latlng).addTo(map).bindPopup(popup);
+        function getPinIcon(rating) {
+            const colors = { 1: '#bfdbfe', 2: '#60a5fa', 3: '#2563eb', 4: '#1e40af', 5: '#172554' };
+            const c = colors[rating] || colors[3];
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="${c}" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.3));"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3" fill="white"/></svg>`;
+            return L.divIcon({ className: 'custom-pin', html: svg, iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] });
+        }
+
+        function createMarker(latlng, name, url, rating = 3) {
+            const stars = "★".repeat(rating) + "☆".repeat(5 - rating);
+            const popup = `<div class="p-2 min-w-[150px]"><h4 class="font-bold text-gray-800 border-b pb-1 mb-2">${name}</h4><div class="text-yellow-500 text-sm mb-2 tracking-widest">${stars}</div>${url ? `<a href="${url}" target="_blank" class="text-blue-500 text-sm flex items-center gap-1"><i data-lucide="external-link" size="14"></i> 物件詳細</a>` : '<p class="text-xs text-gray-400">URLなし</p>'}<button onclick="window.removeAt('${latlng.lat}', '${latlng.lng}')" class="mt-4 w-full text-center py-1 text-red-400 text-xs border border-red-100 rounded hover:bg-red-50">削除</button></div>`;
+            
+            const m = L.marker(latlng, { icon: getPinIcon(rating) }).addTo(map).bindPopup(popup);
             m.on('popupopen', () => lucide.createIcons());
+            
+            // 消しゴム機能：クリック（タップ）で削除
+            m.on('click', (e) => {
+                if (mode === 'eraser') {
+                    // ポップアップを開かせない
+                    e.target.closePopup();
+                    e.originalEvent.preventDefault();
+                    e.originalEvent.stopPropagation();
+                    window.removeAt(latlng.lat, latlng.lng); // 既存の削除関数を利用
+                }
+            });
+
             return m;
         }
 
@@ -334,25 +506,45 @@
             } catch (e) {}
         }
 
-        function undoLastAction() { if (drawings.length > 0) { map.removeLayer(drawings.pop()); saveToLocal(); } }
+        function undoLastAction() { 
+            if (drawings.length > 0) { 
+                const last = drawings.pop();
+                map.removeLayer(last.instance); 
+                saveToLocal(); 
+            } 
+        }
 
         function clearAll() {
             if (!confirm("すべて削除しますか？")) return;
-            drawings.forEach(d => map.removeLayer(d)); markers.forEach(m => map.removeLayer(m.instance));
+            drawings.forEach(d => map.removeLayer(d.instance)); markers.forEach(m => map.removeLayer(m.instance));
             drawings = []; markers = []; saveToLocal();
             document.getElementById('config-modal').classList.add('hidden');
         }
 
-        function getMapState() { return { drawings: drawings.map(d => d.getLatLngs()), markers: markers.map(m => ({ latlng: m.latlng, name: m.name, url: m.url })), center: map.getCenter(), zoom: map.getZoom() }; }
+        function getMapState() { 
+            return { 
+                drawings: drawings.map(d => ({ latlngs: d.instance.getLatLngs(), color: d.color })), 
+                markers: markers.map(m => ({ latlng: m.latlng, name: m.name, url: m.url, rating: m.rating })), 
+                center: map.getCenter(), 
+                zoom: map.getZoom() 
+            }; 
+        }
 
         function applyMapData(data) {
             if (!data) return;
-            drawings.forEach(d => map.removeLayer(d)); markers.forEach(m => map.removeLayer(m.instance));
+            drawings.forEach(d => map.removeLayer(d.instance)); markers.forEach(m => map.removeLayer(m.instance));
             drawings = []; markers = [];
             if (data.center) map.setView(data.center, data.zoom);
-            const weight = getWeightForZoom();
-            if (data.drawings) data.drawings.forEach(p => drawings.push(L.polyline(p, { color: '#3b82f6', weight: weight, opacity: 0.8, lineJoin: 'round', lineCap: 'round' }).addTo(map)));
-            if (data.markers) data.markers.forEach(m => markers.push({ ...m, instance: createMarker(m.latlng, m.name, m.url) }));
+            
+            if (data.drawings) {
+                data.drawings.forEach(d => {
+                    // 旧データ形式対応 (配列のみの場合とオブジェクトの場合)
+                    const path = Array.isArray(d) ? d : d.latlngs;
+                    const color = d.color || '#3b82f6';
+                    createPolyline(path, color);
+                });
+            }
+            if (data.markers) data.markers.forEach(m => markers.push({ ...m, instance: createMarker(m.latlng, m.name, m.url, m.rating) }));
         }
 
         function saveToLocal() { localStorage.setItem(STORAGE_KEY, JSON.stringify(getMapState())); }
@@ -409,8 +601,8 @@
             setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 500); }, 3000);
         }
 
-        // 初期化実行
         init();
     </script>
 </body>
 </html>
+
