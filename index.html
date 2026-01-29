@@ -67,7 +67,7 @@
                     <button id="btn-draw-red" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90 flex-shrink-0" title="赤ペン">
                         <i data-lucide="pencil" class="text-red-500"></i>
                     </button>
-                    <button id="btn-eraser" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90 flex-shrink-0" title="消しゴム (タップして削除)">
+                    <button id="btn-eraser" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90 flex-shrink-0" title="消しゴム (なぞって削除)">
                         <i data-lucide="eraser"></i>
                     </button>
 
@@ -267,44 +267,53 @@
 
         // --- Pointer Event Handlers for Drawing ---
         function handlePointerDown(e) {
-            if (mode !== 'draw') return;
-            e.preventDefault(); // デフォルトのタッチアクション（スクロール等）を無効化
+            // 消しゴムモードもCanvasでイベントを処理する
+            if (mode !== 'draw' && mode !== 'eraser') return;
+            e.preventDefault(); 
             isDrawing = true;
             
             const rect = canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
-            
-            currentPath = [{x, y}];
-            
-            ctx.beginPath();
-            ctx.moveTo(x, y);
-            ctx.strokeStyle = currentColor;
-            ctx.lineWidth = getWeightForZoom();
-            ctx.lineJoin = 'round';
-            ctx.lineCap = 'round';
+
+            if (mode === 'eraser') {
+                // タップした瞬間も消す
+                eraseAt(x, y);
+            } else {
+                currentPath = [{x, y}];
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.strokeStyle = currentColor;
+                ctx.lineWidth = getWeightForZoom();
+                ctx.lineJoin = 'round';
+                ctx.lineCap = 'round';
+            }
         }
 
         function handlePointerMove(e) {
-            if (!isDrawing || mode !== 'draw') return;
+            if (!isDrawing || (mode !== 'draw' && mode !== 'eraser')) return;
             e.preventDefault();
             
             const rect = canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
-            
-            currentPath.push({x, y});
-            
-            ctx.lineTo(x, y);
-            ctx.stroke();
+
+            if (mode === 'eraser') {
+                // なぞって消す
+                eraseAt(x, y);
+            } else {
+                currentPath.push({x, y});
+                ctx.lineTo(x, y);
+                ctx.stroke();
+            }
         }
 
         function handlePointerUp(e) {
-            if (!isDrawing || mode !== 'draw') return;
+            if (!isDrawing || (mode !== 'draw' && mode !== 'eraser')) return;
             e.preventDefault();
             isDrawing = false;
             
-            if (currentPath.length > 1) {
+            if (mode === 'draw' && currentPath.length > 1) {
                 // ピクセル座標を緯度経度に変換
                 const latLngs = currentPath.map(p => map.containerPointToLatLng([p.x, p.y]));
                 createPolyline(latLngs, currentColor);
@@ -312,6 +321,57 @@
             }
             clearCanvas();
             currentPath = [];
+        }
+
+        // 指定座標付近のオブジェクトを削除する関数
+        function eraseAt(x, y) {
+            const threshold = 25; // 削除判定の半径(px)
+
+            // 1. 線の削除判定
+            // 逆ループで安全に削除
+            for (let i = drawings.length - 1; i >= 0; i--) {
+                const d = drawings[i];
+                const latLngs = d.instance.getLatLngs();
+                
+                // 簡易判定: 線を構成する点との距離が近いか
+                // 本来は線分との距離を見るべきだが、手書き線は点が密なので点間距離で十分機能する
+                let hit = false;
+                for (const ll of latLngs) {
+                    const p = map.latLngToContainerPoint(ll);
+                    if (Math.hypot(p.x - x, p.y - y) < threshold) {
+                        hit = true;
+                        break;
+                    }
+                }
+
+                if (hit) {
+                    map.removeLayer(d.instance);
+                    drawings.splice(i, 1);
+                    saveToLocal();
+                    
+                    // 視覚的なフィードバック（消した場所に白い円を一瞬出すなど）があると良いが、
+                    // ここではシンプルにCanvasに「消しゴム軌跡」を表示
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.beginPath();
+                    ctx.arc(x, y, threshold, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+            }
+
+            // 2. マーカーの削除判定
+            for (let i = markers.length - 1; i >= 0; i--) {
+                const m = markers[i];
+                const p = map.latLngToContainerPoint(m.latlng);
+                // マーカーはアイコンが大きいので判定は中心点ではなくアイコン領域全体をカバーしたいが、
+                // 簡易的に中心からの距離で判定（少し広めに）
+                if (Math.hypot(p.x - x, p.y - 40 + 20) < 40) { // アイコンの見た目の中心付近
+                    map.removeLayer(m.instance);
+                    markers.splice(i, 1);
+                    saveToLocal();
+                }
+            }
         }
 
         function createPolyline(path, color) {
@@ -324,7 +384,7 @@
                 className: 'drawable-path' 
             }).addTo(map);
 
-            // 消しゴム機能
+            // 念のためクリックイベントも残すが、主な削除はeraseAtで行う
             polyline.on('click', (e) => {
                 if (mode === 'eraser') {
                     L.DomEvent.stopPropagation(e);
@@ -432,19 +492,21 @@
                 }
             });
 
-            // モード切り替えロジックの改善
-            // drawモード時はCanvasが全てのイベントを受け取る (pointer-events: auto)
-            // それ以外は地図がイベントを受け取る (pointer-events: none)
-            if (mode === 'draw') {
+            // モード切り替えロジック
+            // drawモードとeraserモードはCanvasが全てのイベントを受け取る (pointer-events: auto)
+            // これにより、消しゴム使用中も地図が動かず、なぞって消す操作が可能になる
+            if (mode === 'draw' || mode === 'eraser') {
                 canvas.style.pointerEvents = 'auto'; 
-                document.getElementById('map').style.cursor = 'crosshair';
+                
+                if (mode === 'eraser') {
+                    // 消しゴムっぽいカーソル（円形が望ましいがCSS標準にはないので近似）
+                    document.getElementById('map').style.cursor = 'cell'; 
+                } else {
+                    document.getElementById('map').style.cursor = 'crosshair';
+                }
             } else {
                 canvas.style.pointerEvents = 'none'; 
-                if (mode === 'eraser') {
-                    document.getElementById('map').style.cursor = 'not-allowed';
-                } else {
-                    document.getElementById('map').style.cursor = 'grab';
-                }
+                document.getElementById('map').style.cursor = 'grab';
             }
         }
 
@@ -482,7 +544,7 @@
             const m = L.marker(latlng, { icon: getPinIcon(rating) }).addTo(map).bindPopup(popup);
             m.on('popupopen', () => lucide.createIcons());
             
-            // 消しゴム機能：クリック（タップ）で削除
+            // 消しゴム機能：クリック（タップ）で削除（バックアップ）
             m.on('click', (e) => {
                 if (mode === 'eraser') {
                     // ポップアップを開かせない
