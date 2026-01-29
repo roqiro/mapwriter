@@ -288,11 +288,19 @@
         // --- Pointer Event Handlers for Drawing ---
         function handlePointerDown(e) {
             if (mode !== 'draw' && mode !== 'eraser') return;
-            // マルチタッチ（ピンチ操作など）の誤反応防止。ペンや指の1本目だけ反応する。
-            if (!e.isPrimary) return; 
+
+            // ペン入力(pen)の場合は、isPrimaryに関わらず描画を許可する。
+            // これにより、手が触れていてもペンの反応が優先され、2画目以降の取りこぼしが減る。
+            const isPen = e.pointerType === 'pen';
+            
+            // 指入力の場合は、マルチタッチ誤爆防止のためisPrimaryのみ許可。
+            if (!isPen && !e.isPrimary) return; 
 
             e.preventDefault(); 
             isDrawing = true;
+            
+            // ポインターキャプチャを設定して、高速な描画でのイベント漏れを防ぐ
+            canvas.setPointerCapture(e.pointerId);
             
             const rect = canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
@@ -313,7 +321,10 @@
 
         function handlePointerMove(e) {
             if (!isDrawing || (mode !== 'draw' && mode !== 'eraser')) return;
-            if (!e.isPrimary) return; // マルチタッチ防止
+            
+            // ペンなら許可、指ならPrimaryのみ
+            const isPen = e.pointerType === 'pen';
+            if (!isPen && !e.isPrimary) return; 
 
             e.preventDefault();
             
@@ -332,10 +343,18 @@
 
         function handlePointerUp(e) {
             if (!isDrawing || (mode !== 'draw' && mode !== 'eraser')) return;
-            if (!e.isPrimary) return; 
+            
+            // ペンなら許可、指ならPrimaryのみ
+            const isPen = e.pointerType === 'pen';
+            if (!isPen && !e.isPrimary) return; 
 
             e.preventDefault();
             isDrawing = false;
+            
+            // キャプチャ解放（安全のため）
+            if (canvas.hasPointerCapture(e.pointerId)) {
+                canvas.releasePointerCapture(e.pointerId);
+            }
             
             if (mode === 'draw' && currentPath.length > 1) {
                 const latLngs = currentPath.map(p => map.containerPointToLatLng([p.x, p.y]));
