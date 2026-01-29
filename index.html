@@ -35,7 +35,7 @@
         /* ボタンなどはイベントを受け取る */
         .ui-panel button, .ui-panel input { pointer-events: auto; }
         
-        #property-modal, #config-modal { z-index: 2000; }
+        #property-modal, #config-modal, #auto-register-modal { z-index: 2000; }
         .leaflet-control-attribution { display: none !important; }
         .modal-enter { animation: modalFadeIn 0.2s ease-out; }
         @keyframes modalFadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
@@ -75,6 +75,9 @@
 
                     <button id="btn-marker" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90 flex-shrink-0" title="ピンを立てる">
                         <i data-lucide="map-pin"></i>
+                    </button>
+                    <button id="btn-auto-marker" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90 flex-shrink-0" title="住所から登録">
+                        <i data-lucide="map-pin-plus"></i>
                     </button>
                     
                     <div class="w-px bg-gray-200 mx-1 flex-shrink-0"></div>
@@ -119,6 +122,46 @@
                 <div class="flex gap-2 pt-2">
                     <button id="btn-save-prop" class="flex-1 bg-blue-500 text-white py-4 rounded-xl font-bold shadow-lg shadow-blue-200 active:scale-95 transition-transform">保存</button>
                     <button id="btn-cancel-prop" class="flex-1 bg-gray-100 text-gray-700 py-4 rounded-xl font-bold active:scale-95 transition-transform">閉じる</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auto Register Modal (New) -->
+    <div id="auto-register-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto">
+        <div class="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl modal-enter my-auto">
+            <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-gray-800"><i data-lucide="map-pin-plus" class="text-blue-500"></i> 住所から登録</h3>
+            <p class="text-sm text-gray-500 mb-4">SUUMOなどの住所を貼り付けると、場所を検索してピンを立てます。</p>
+            <div class="space-y-4">
+                <div class="space-y-1">
+                    <label class="text-xs font-bold text-gray-500 ml-1">住所 (必須)</label>
+                    <input type="text" id="auto-address" class="w-full px-4 py-3 bg-gray-50 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="例: 東京都新宿区...">
+                </div>
+                
+                <div class="space-y-1">
+                    <label class="text-xs font-bold text-gray-500 ml-1">物件名 / メモ</label>
+                    <input type="text" id="auto-name" class="w-full px-4 py-3 bg-gray-50 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="物件名">
+                </div>
+
+                <div class="space-y-1">
+                    <label class="text-xs font-bold text-gray-500 ml-1">URL (任意)</label>
+                    <input type="url" id="auto-url" class="w-full px-4 py-3 bg-gray-50 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="https://...">
+                </div>
+
+                <div class="flex flex-col gap-2">
+                    <label class="text-xs font-bold text-gray-500 ml-1">お気に入り度</label>
+                    <div class="flex justify-between bg-gray-50 p-2 rounded-xl" id="auto-star-container">
+                        <button type="button" class="auto-star-btn p-2 text-gray-300 transition-colors" data-rating="1"><i data-lucide="star"></i></button>
+                        <button type="button" class="auto-star-btn p-2 text-gray-300 transition-colors" data-rating="2"><i data-lucide="star"></i></button>
+                        <button type="button" class="auto-star-btn p-2 text-gray-300 transition-colors" data-rating="3"><i data-lucide="star"></i></button>
+                        <button type="button" class="auto-star-btn p-2 text-gray-300 transition-colors" data-rating="4"><i data-lucide="star"></i></button>
+                        <button type="button" class="auto-star-btn p-2 text-gray-300 transition-colors" data-rating="5"><i data-lucide="star"></i></button>
+                    </div>
+                </div>
+
+                <div class="flex gap-2 pt-2">
+                    <button id="btn-do-auto-register" class="flex-1 bg-blue-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-blue-200 active:scale-95 transition-transform">検索して登録</button>
+                    <button id="btn-cancel-auto" class="flex-1 bg-gray-100 text-gray-700 py-4 rounded-xl font-bold active:scale-95 transition-transform">閉じる</button>
                 </div>
             </div>
         </div>
@@ -172,6 +215,7 @@
         let pendingLatLng = null;
         let pendingMarker = null; // 編集中のマーカー
         let currentRating = 3;
+        let autoRegisterRating = 3;
 
         const getFirebaseConfig = () => {
             if (typeof __firebase_config !== 'undefined' && __firebase_config) return JSON.parse(__firebase_config);
@@ -359,7 +403,7 @@
             if (mode === 'draw' && currentPath.length > 1) {
                 const latLngs = currentPath.map(p => map.containerPointToLatLng([p.x, p.y]));
                 createPolyline(latLngs, currentColor);
-                saveToLocal();
+                saveToLocalDebounced(); // 即時保存ではなくデバウンス保存
             }
             clearCanvas();
             currentPath = [];
@@ -367,6 +411,7 @@
 
         function eraseAt(x, y) {
             const threshold = 25; 
+            let changed = false;
 
             for (let i = drawings.length - 1; i >= 0; i--) {
                 const d = drawings[i];
@@ -384,7 +429,7 @@
                 if (hit) {
                     map.removeLayer(d.instance);
                     drawings.splice(i, 1);
-                    saveToLocal();
+                    changed = true;
                     
                     ctx.save();
                     ctx.globalCompositeOperation = 'destination-out';
@@ -401,8 +446,12 @@
                 if (Math.hypot(p.x - x, p.y - 40 + 20) < 40) {
                     map.removeLayer(m.instance);
                     markers.splice(i, 1);
-                    saveToLocal();
+                    changed = true;
                 }
+            }
+
+            if (changed) {
+                saveToLocalDebounced();
             }
         }
 
@@ -430,7 +479,7 @@
         function removeDrawing(polylineInstance) {
             map.removeLayer(polylineInstance);
             drawings = drawings.filter(d => d.instance !== polylineInstance);
-            saveToLocal();
+            saveToLocalDebounced();
         }
 
         function resizeCanvas() { if (canvas) { canvas.width = window.innerWidth; canvas.height = window.innerHeight; } }
@@ -442,6 +491,7 @@
                 'btn-draw-red': () => setMode('draw', '#ef4444'),
                 'btn-eraser': () => setMode('eraser'),
                 'btn-marker': () => setMode('marker'),
+                'btn-auto-marker': openAutoRegisterModal,
                 'btn-undo': undoLastAction,
                 'btn-config': () => document.getElementById('config-modal').classList.remove('hidden'),
                 'btn-close-config': () => document.getElementById('config-modal').classList.add('hidden'),
@@ -451,6 +501,8 @@
                 'btn-cloud-load': cloudLoad,
                 'btn-cancel-prop': () => document.getElementById('property-modal').classList.add('hidden'),
                 'btn-save-prop': saveMarker,
+                'btn-cancel-auto': () => document.getElementById('auto-register-modal').classList.add('hidden'),
+                'btn-do-auto-register': doAutoRegister,
                 'btn-search': search
             };
 
@@ -463,6 +515,14 @@
                 btn.onclick = (e) => {
                     const r = parseInt(e.currentTarget.dataset.rating);
                     setRating(r);
+                };
+            });
+            
+            // Auto Register Star Buttons
+            document.querySelectorAll('.auto-star-btn').forEach(btn => {
+                btn.onclick = (e) => {
+                    const r = parseInt(e.currentTarget.dataset.rating);
+                    setAutoRegisterRating(r);
                 };
             });
 
@@ -486,6 +546,15 @@
                 else btn.classList.remove('active');
             });
         }
+        
+        function setAutoRegisterRating(r) {
+            autoRegisterRating = r;
+            document.querySelectorAll('.auto-star-btn').forEach(btn => {
+                const btnR = parseInt(btn.dataset.rating);
+                if (btnR <= r) btn.classList.add('active');
+                else btn.classList.remove('active');
+            });
+        }
 
         function resetRating() { setRating(3); }
 
@@ -493,7 +562,7 @@
             mode = m;
             if (color) currentColor = color;
 
-            const btns = ['btn-move', 'btn-draw-blue', 'btn-draw-red', 'btn-eraser', 'btn-marker'];
+            const btns = ['btn-move', 'btn-draw-blue', 'btn-draw-red', 'btn-eraser', 'btn-marker', 'btn-auto-marker'];
             btns.forEach(id => {
                 const btn = document.getElementById(id);
                 if (!btn) return;
@@ -505,6 +574,8 @@
                 } else if (id === `btn-${m}`) {
                     isActive = true;
                 }
+                
+                if (id === 'btn-auto-marker') isActive = false;
 
                 if (isActive) {
                     btn.classList.add('bg-blue-500', 'text-white');
@@ -556,18 +627,67 @@
                 const newPopupContent = generatePopupContent(pendingMarker.latlng, name, url, currentRating);
                 pendingMarker.instance.setPopupContent(newPopupContent);
                 
-                saveToLocal();
+                saveToLocal(); // マーカー登録は頻度が低いので即時保存でOK
                 pendingMarker = null; // リセット
             } else if (pendingLatLng) {
                 // 新規マーカーの作成
                 const marker = createMarker(pendingLatLng, name, url, currentRating);
                 markers.push({ latlng: pendingLatLng, name, url, rating: currentRating, instance: marker });
-                saveToLocal();
+                saveToLocal(); // マーカー登録は即時保存
             }
             
             document.getElementById('property-modal').classList.add('hidden');
             document.getElementById('prop-name').value = ''; document.getElementById('prop-url').value = '';
             setMode('move');
+        }
+        
+        function openAutoRegisterModal() {
+            document.getElementById('auto-address').value = '';
+            document.getElementById('auto-name').value = '';
+            document.getElementById('auto-url').value = '';
+            setAutoRegisterRating(3);
+            document.getElementById('auto-register-modal').classList.remove('hidden');
+            lucide.createIcons();
+        }
+        
+        async function doAutoRegister() {
+            const address = document.getElementById('auto-address').value;
+            const name = document.getElementById('auto-name').value || '登録物件';
+            const url = document.getElementById('auto-url').value;
+            const rating = autoRegisterRating;
+            
+            if (!address) {
+                showToast("住所を入力してください");
+                return;
+            }
+            
+            document.getElementById('loading').classList.remove('hidden');
+            
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`);
+                const d = await res.json();
+                
+                if (d && d.length > 0) {
+                    const place = d[0];
+                    const latlng = L.latLng(place.lat, place.lon);
+                    
+                    const marker = createMarker(latlng, name, url, rating);
+                    markers.push({ latlng: latlng, name, url, rating, instance: marker });
+                    saveToLocal(); // 自動登録も即時保存
+                    
+                    map.setView(latlng, 17);
+                    
+                    document.getElementById('auto-register-modal').classList.add('hidden');
+                    showToast("ピンを登録しました！");
+                } else {
+                    showToast("住所が見つかりませんでした");
+                }
+            } catch(e) {
+                console.error(e);
+                showToast("エラーが発生しました");
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+            }
         }
 
         function getPinIcon(rating) {
@@ -577,7 +697,6 @@
             return L.divIcon({ className: 'custom-pin', html: svg, iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] });
         }
         
-        // ポップアップのHTML生成を関数化して編集時にも再利用できるようにする
         function generatePopupContent(latlng, name, url, rating) {
             const stars = "★".repeat(rating) + "☆".repeat(5 - rating);
             return `
@@ -609,7 +728,6 @@
             return m;
         }
         
-        // 編集機能の実装
         window.editMarker = (lat, lng) => {
             const target = markers.find(m => m.latlng.lat == lat && m.latlng.lng == lng);
             if (!target) return;
@@ -643,13 +761,11 @@
                 const d = await res.json();
                 if (d && d.length > 0) {
                     const place = d[0];
-                    // バウンディングボックス（範囲）がある場合はそれに合わせてズーム
                     if (place.boundingbox) {
                         const southWest = [place.boundingbox[0], place.boundingbox[2]];
                         const northEast = [place.boundingbox[1], place.boundingbox[3]];
-                        map.fitBounds([southWest, northEast], { padding: [50, 50] }); // 少し余白を持たせる
+                        map.fitBounds([southWest, northEast], { padding: [50, 50] });
                     } else {
-                        // 範囲がない場合は中心点に移動してズーム（強めに）
                         map.setView([place.lat, place.lon], 17);
                     }
                 } else {
@@ -665,7 +781,7 @@
             if (drawings.length > 0) { 
                 const last = drawings.pop();
                 map.removeLayer(last.instance); 
-                saveToLocal(); 
+                saveToLocal(); // Undoは頻度が低いので即時保存
             } 
         }
 
@@ -701,7 +817,26 @@
             if (data.markers) data.markers.forEach(m => markers.push({ ...m, instance: createMarker(m.latlng, m.name, m.url, m.rating) }));
         }
 
-        function saveToLocal() { localStorage.setItem(STORAGE_KEY, JSON.stringify(getMapState())); }
+        let saveTimeout = null;
+        // デバウンス保存: 連続して呼び出されても、最後の呼び出しから1秒後に1回だけ実行する
+        function saveToLocalDebounced() {
+            if (saveTimeout) clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => {
+                saveToLocal();
+                saveTimeout = null;
+            }, 1000); // 1秒間操作がなければ保存
+        }
+
+        function saveToLocal() { 
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(getMapState())); 
+                // 保存完了の小さなフィードバックがあってもいいかもしれないが、今回はシンプルに
+            } catch (e) {
+                console.error("Save failed", e);
+                // 容量オーバーなどのエラーハンドリング
+            }
+        }
+        
         function loadFromLocal() { const saved = localStorage.getItem(STORAGE_KEY); if (saved) applyMapData(JSON.parse(saved)); }
 
         function exportData() {
