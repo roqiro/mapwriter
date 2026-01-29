@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>物件探し手書きマップ</title>
+    
+    <!-- PWA / iOS App settings -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="物件マップ">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/888/888848.png">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body, html { height: 100%; margin: 0; overflow: hidden; background: #000; }
+        #map { height: 100%; width: 100%; z-index: 1; }
+        .canvas-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+            touch-action: none;
+        }
+        .canvas-overlay.active {
+            pointer-events: auto;
+        }
+        .leaflet-container {
+            cursor: crosshair !important;
+            background: #f0f0f0;
+        }
+        .ui-panel {
+            z-index: 1000;
+            padding-top: env(safe-area-inset-top, 20px);
+        }
+        #property-modal {
+            z-index: 2000;
+        }
+        /* Hide leaflet branding for app-like feel */
+        .leaflet-control-attribution { display: none !important; }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <!-- UI Overlay -->
+    <div class="ui-panel fixed top-0 left-4 right-4 flex flex-col gap-2 pointer-events-none mt-4">
+        <div class="flex justify-between items-start">
+            <div class="flex flex-col gap-2 pointer-events-auto">
+                <div class="bg-white/90 backdrop-blur-md p-2 rounded-2xl shadow-xl flex gap-1 md:gap-2">
+                    <button id="btn-move" class="p-3 rounded-xl bg-blue-500 text-white shadow-sm transition-all active:scale-90" title="移動">
+                        <i data-lucide="move"></i>
+                    </button>
+                    <button id="btn-draw" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90" title="手書きモード">
+                        <i data-lucide="pencil"></i>
+                    </button>
+                    <button id="btn-marker" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90" title="ピンを立てる">
+                        <i data-lucide="map-pin"></i>
+                    </button>
+                    <div class="w-px bg-gray-200 mx-1"></div>
+                    <button id="btn-undo" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90" title="元に戻す">
+                        <i data-lucide="undo-2"></i>
+                    </button>
+                    <button id="btn-config" class="p-3 rounded-xl bg-white text-gray-700 border shadow-sm transition-all active:scale-90" title="設定・保存">
+                        <i data-lucide="settings"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Search Bar -->
+            <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-xl flex items-center p-1 pointer-events-auto w-48 md:w-80">
+                <input type="text" id="search-input" placeholder="駅、住所を検索..." class="flex-1 px-4 py-2 bg-transparent outline-none text-sm">
+                <button id="btn-search" class="p-2 text-gray-500 hover:text-blue-500">
+                    <i data-lucide="search"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Map Container -->
+    <div id="map"></div>
+    <canvas id="drawing-canvas" class="canvas-overlay"></canvas>
+
+    <!-- Property Info Modal -->
+    <div id="property-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl">
+            <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-gray-800">
+                <i data-lucide="home" class="text-blue-500"></i>
+                物件情報を登録
+            </h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">物件名 / メモ</label>
+                    <input type="text" id="prop-name" class="w-full px-4 py-3 bg-gray-50 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="例：サンプルマンション 302">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">URL (リンク)</label>
+                    <input type="url" id="prop-url" class="w-full px-4 py-3 bg-gray-50 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="https://...">
+                </div>
+                <div class="flex gap-2 pt-2">
+                    <button id="btn-save-prop" class="flex-1 bg-blue-500 text-white py-4 rounded-xl font-bold shadow-lg shadow-blue-200 active:scale-95 transition-transform">保存</button>
+                    <button id="btn-cancel-prop" class="flex-1 bg-gray-100 text-gray-700 py-4 rounded-xl font-bold active:scale-95 transition-transform">キャンセル</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings/Backup Modal -->
+    <div id="config-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl">
+            <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-gray-800">
+                <i data-lucide="settings" class="text-gray-500"></i>
+                設定・管理
+            </h3>
+            <div class="space-y-3">
+                <p class="text-sm text-gray-500">データは現在このiPadに保存されています。</p>
+                <button id="btn-export" class="w-full flex items-center justify-center gap-2 bg-gray-50 hover:bg-gray-100 text-gray-700 py-3 rounded-xl border border-gray-200 font-medium">
+                    <i data-lucide="download" size="18"></i> データをバックアップ保存
+                </button>
+                <button id="btn-clear-all" class="w-full flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 text-red-600 py-3 rounded-xl border border-red-100 font-medium">
+                    <i data-lucide="trash-2" size="18"></i> すべてのデータを消去
+                </button>
+                <button id="btn-close-config" class="w-full bg-gray-800 text-white py-4 rounded-xl font-bold mt-2">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        const STORAGE_KEY = 'property_map_data_v1';
+        let map, canvas, ctx;
+        let mode = 'move';
+        let isDrawing = false;
+        let currentPath = [];
+        let drawings = [];
+        let markers = [];
+        let pendingLatLng = null;
+
+        function initMap() {
+            map = L.map('map', {
+                zoomControl: false,
+                tap: false,
+                attributionControl: false
+            }).setView([35.6812, 139.7671], 13);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+            canvas = document.getElementById('drawing-canvas');
+            ctx = canvas.getContext('2d');
+            resizeCanvas();
+
+            window.addEventListener('resize', resizeCanvas);
+            loadData();
+            setupEventListeners();
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        function setupEventListeners() {
+            document.getElementById('btn-move').onclick = () => setMode('move');
+            document.getElementById('btn-draw').onclick = () => setMode('draw');
+            document.getElementById('btn-marker').onclick = () => setMode('marker');
+            document.getElementById('btn-undo').onclick = undoLastAction;
+            
+            document.getElementById('btn-config').onclick = () => document.getElementById('config-modal').classList.remove('hidden');
+            document.getElementById('btn-close-config').onclick = () => document.getElementById('config-modal').classList.add('hidden');
+            document.getElementById('btn-clear-all').onclick = clearAll;
+            document.getElementById('btn-export').onclick = exportData;
+
+            map.on('mousedown touchstart', (e) => {
+                if (mode !== 'draw') return;
+                isDrawing = true;
+                currentPath = [e.latlng];
+                map.dragging.disable();
+            });
+
+            map.on('mousemove touchmove', (e) => {
+                if (!isDrawing || mode !== 'draw') return;
+                currentPath.push(e.latlng);
+                drawTempPath();
+            });
+
+            map.on('mouseup touchend', (e) => {
+                if (!isDrawing || mode !== 'draw') return;
+                isDrawing = false;
+                const polyline = L.polyline(currentPath, { color: '#3b82f6', weight: 4, opacity: 0.8 }).addTo(map);
+                drawings.push(polyline);
+                clearCanvas();
+                saveData();
+                map.dragging.enable();
+            });
+
+            map.on('click', (e) => {
+                if (mode === 'marker') {
+                    pendingLatLng = e.latlng;
+                    showModal();
+                }
+            });
+
+            document.getElementById('btn-cancel-prop').onclick = hideModal;
+            document.getElementById('btn-save-prop').onclick = saveProperty;
+            document.getElementById('btn-search').onclick = searchLocation;
+            document.getElementById('search-input').onkeypress = (e) => { if (e.key === 'Enter') searchLocation(); };
+        }
+
+        function setMode(newMode) {
+            mode = newMode;
+            ['btn-move', 'btn-draw', 'btn-marker'].forEach(id => {
+                const btn = document.getElementById(id);
+                if (id === `btn-${newMode}`) {
+                    btn.classList.add('bg-blue-500', 'text-white');
+                    btn.classList.remove('bg-white', 'text-gray-700');
+                } else {
+                    btn.classList.remove('bg-blue-500', 'text-white');
+                    btn.classList.add('bg-white', 'text-gray-700');
+                }
+            });
+
+            const canvasEl = document.getElementById('drawing-canvas');
+            if (mode === 'draw') {
+                canvasEl.classList.add('active');
+                map.dragging.disable();
+            } else {
+                canvasEl.classList.remove('active');
+                map.dragging.enable();
+            }
+        }
+
+        function drawTempPath() {
+            clearCanvas();
+            if (currentPath.length < 2) return;
+            ctx.beginPath();
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 4;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            const startPoint = map.latLngToContainerPoint(currentPath[0]);
+            ctx.moveTo(startPoint.x, startPoint.y);
+            for (let i = 1; i < currentPath.length; i++) {
+                const point = map.latLngToContainerPoint(currentPath[i]);
+                ctx.lineTo(point.x, point.y);
+            }
+            ctx.stroke();
+        }
+
+        function clearCanvas() { ctx.clearRect(0, 0, canvas.width, canvas.height); }
+
+        function showModal() { document.getElementById('property-modal').classList.remove('hidden'); document.getElementById('prop-name').focus(); }
+        function hideModal() {
+            document.getElementById('property-modal').classList.add('hidden');
+            document.getElementById('prop-name').value = '';
+            document.getElementById('prop-url').value = '';
+            pendingLatLng = null;
+        }
+
+        function saveProperty() {
+            const name = document.getElementById('prop-name').value || '無題の物件';
+            const url = document.getElementById('prop-url').value;
+            if (pendingLatLng) {
+                const marker = createPropertyMarker(pendingLatLng, name, url);
+                markers.push({ latlng: pendingLatLng, name, url, instance: marker });
+                saveData();
+            }
+            hideModal();
+            setMode('move');
+        }
+
+        function createPropertyMarker(latlng, name, url) {
+            const popupContent = `
+                <div class="p-2 min-w-[150px]">
+                    <h4 class="font-bold text-gray-800 border-b pb-1 mb-2">${name}</h4>
+                    ${url ? `<a href="${url}" target="_blank" class="text-blue-500 underline text-sm flex items-center gap-1">
+                        物件を見る <i data-lucide="external-link" size="14"></i>
+                    </a>` : '<p class="text-xs text-gray-400 italic">URLなし</p>'}
+                    <button onclick="removeMarkerAt('${latlng.lat}', '${latlng.lng}')" class="mt-4 text-red-500 text-xs flex items-center gap-1 opacity-50 hover:opacity-100">
+                        <i data-lucide="trash-2" size="12"></i> 削除する
+                    </button>
+                </div>
+            `;
+            const marker = L.marker(latlng).addTo(map).bindPopup(popupContent);
+            marker.on('popupopen', () => lucide.createIcons());
+            return marker;
+        }
+
+        window.removeMarkerAt = function(lat, lng) {
+            const index = markers.findIndex(m => m.latlng.lat == lat && m.latlng.lng == lng);
+            if (index > -1) {
+                map.removeLayer(markers[index].instance);
+                markers.splice(index, 1);
+                saveData();
+            }
+        };
+
+        async function searchLocation() {
+            const query = document.getElementById('search-input').value;
+            if (!query) return;
+            try {
+                const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+                const data = await response.json();
+                if (data.length > 0) {
+                    map.setView([data[0].lat, data[0].lon], 15);
+                }
+            } catch (err) { console.error(err); }
+        }
+
+        function undoLastAction() {
+            if (drawings.length > 0) {
+                const last = drawings.pop();
+                map.removeLayer(last);
+                saveData();
+            }
+        }
+
+        function clearAll() {
+            if (confirm("すべての手書きとピンを完全に削除しますか？")) {
+                drawings.forEach(d => map.removeLayer(d));
+                markers.forEach(m => map.removeLayer(m.instance));
+                drawings = [];
+                markers = [];
+                saveData();
+                document.getElementById('config-modal').classList.add('hidden');
+            }
+        }
+
+        function exportData() {
+            const data = localStorage.getItem(STORAGE_KEY);
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `property_map_backup_${new Date().toISOString().slice(0,10)}.json`;
+            a.click();
+        }
+
+        function saveData() {
+            const data = {
+                drawings: drawings.map(d => d.getLatLngs()),
+                markers: markers.map(m => ({ latlng: m.latlng, name: m.name, url: m.url })),
+                center: map.getCenter(),
+                zoom: map.getZoom()
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        }
+
+        function loadData() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (!saved) return;
+            try {
+                const data = JSON.parse(saved);
+                if (data.center) map.setView(data.center, data.zoom);
+                if (data.drawings) {
+                    data.drawings.forEach(path => {
+                        const polyline = L.polyline(path, { color: '#3b82f6', weight: 4, opacity: 0.8 }).addTo(map);
+                        drawings.push(polyline);
+                    });
+                }
+                if (data.markers) {
+                    data.markers.forEach(m => {
+                        const markerInstance = createPropertyMarker(m.latlng, m.name, m.url);
+                        markers.push({ ...m, instance: markerInstance });
+                    });
+                }
+            } catch (err) { console.error(err); }
+        }
+
+        window.onload = initMap;
+    </script>
+</body>
+</html>
