@@ -3,9 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>物件探し手書きマップ (暗号化対応版)</title>
+    <title>物件探し手書きマップ (iPad対応・ズーム連動版)</title>
     
-    <!-- PWA / iOS App settings -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="物件マップ">
@@ -14,44 +13,27 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
     <style>
         body, html { height: 100%; margin: 0; overflow: hidden; background: #000; }
-        #map { height: 100%; width: 100%; z-index: 1; }
+        #map { height: 100%; width: 100%; z-index: 1; touch-action: none; }
         .canvas-overlay {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 2;
-            pointer-events: none; 
-            touch-action: none;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 2; pointer-events: none; touch-action: none;
         }
-        .leaflet-container {
-            cursor: crosshair !important;
-            background: #f0f0f0;
-        }
-        .ui-panel {
-            z-index: 1000;
-            padding-top: env(safe-area-inset-top, 20px);
-        }
-        /* Modals should be on top of everything */
-        #property-modal, #config-modal {
-            z-index: 2000;
-        }
+        .leaflet-container { background: #f0f0f0; }
+        .ui-panel { z-index: 1000; padding-top: env(safe-area-inset-top, 20px); }
+        #property-modal, #config-modal { z-index: 2000; }
         .leaflet-control-attribution { display: none !important; }
         .modal-enter { animation: modalFadeIn 0.2s ease-out; }
         @keyframes modalFadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
-        
         button { cursor: pointer; }
     </style>
 </head>
 <body class="bg-gray-100">
 
-    <!-- UI Overlay -->
     <div class="ui-panel fixed top-0 left-4 right-4 flex flex-col gap-2 pointer-events-none mt-4">
         <div class="flex justify-between items-start">
             <div class="flex flex-col gap-2 pointer-events-auto">
@@ -74,134 +56,83 @@
                     </button>
                 </div>
             </div>
-
-            <!-- Search Bar -->
             <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-xl flex items-center p-1 pointer-events-auto w-48 md:w-80 border border-white/20">
                 <input type="text" id="search-input" placeholder="駅、住所を検索..." class="flex-1 px-4 py-2 bg-transparent outline-none text-sm">
-                <button id="btn-search" class="p-2 text-gray-500 hover:text-blue-500">
-                    <i data-lucide="search"></i>
-                </button>
+                <button id="btn-search" class="p-2 text-gray-500 hover:text-blue-500"><i data-lucide="search"></i></button>
             </div>
         </div>
     </div>
 
-    <!-- Map Container -->
     <div id="map"></div>
     <canvas id="drawing-canvas" class="canvas-overlay"></canvas>
 
-    <!-- Property Info Modal -->
+    <!-- Modals -->
     <div id="property-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
         <div class="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl modal-enter">
-            <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-gray-800">
-                <i data-lucide="home" class="text-blue-500"></i>
-                物件情報を登録
-            </h3>
+            <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-gray-800"><i data-lucide="home" class="text-blue-500"></i> 物件登録</h3>
             <div class="space-y-4">
-                <div>
-                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">物件名 / メモ</label>
-                    <input type="text" id="prop-name" class="w-full px-4 py-3 bg-gray-50 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="例：サンプルマンション 302">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">URL (リンク)</label>
-                    <input type="url" id="prop-url" class="w-full px-4 py-3 bg-gray-50 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="https://...">
-                </div>
+                <input type="text" id="prop-name" class="w-full px-4 py-3 bg-gray-50 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="物件名 / メモ">
+                <input type="url" id="prop-url" class="w-full px-4 py-3 bg-gray-50 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="URL (https://...)">
                 <div class="flex gap-2 pt-2">
                     <button id="btn-save-prop" class="flex-1 bg-blue-500 text-white py-4 rounded-xl font-bold shadow-lg shadow-blue-200 active:scale-95 transition-transform">保存</button>
-                    <button id="btn-cancel-prop" class="flex-1 bg-gray-100 text-gray-700 py-4 rounded-xl font-bold active:scale-95 transition-transform">キャンセル</button>
+                    <button id="btn-cancel-prop" class="flex-1 bg-gray-100 text-gray-700 py-4 rounded-xl font-bold active:scale-95 transition-transform">閉じる</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Config Modal -->
     <div id="config-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto">
         <div class="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl modal-enter my-auto">
-            <h3 class="text-xl font-bold mb-6 flex items-center gap-2 text-gray-800">
-                <i data-lucide="shield-check" class="text-green-600"></i>
-                プライベート同期
-            </h3>
-            
+            <h3 class="text-xl font-bold mb-6 flex items-center gap-2 text-gray-800"><i data-lucide="shield-check" class="text-green-600"></i> 同期設定</h3>
             <div class="space-y-6">
-                <!-- Secure Sync Section -->
                 <div class="bg-gray-50 p-5 rounded-2xl space-y-4 border border-gray-100">
-                    <div class="space-y-1">
-                        <h4 class="font-bold text-gray-800 flex items-center gap-2">
-                            <i data-lucide="lock" size="18" class="text-blue-500"></i> 暗号化してクラウド保存
-                        </h4>
-                        <p class="text-xs text-gray-500 leading-relaxed">データは送信前にパスワードで暗号化されます。パスワードがない限り、誰にも中身は見られません。</p>
+                    <input type="password" id="cloud-password" class="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl outline-none text-sm" placeholder="パスワード(4文字以上)">
+                    <button id="btn-cloud-save" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all">保存してID発行</button>
+                    <div id="sync-id-display" class="hidden bg-blue-50 border border-blue-100 p-4 rounded-xl flex items-center justify-between">
+                        <span class="text-lg font-mono font-bold text-blue-900 tracking-wider" id="current-sync-id">----</span>
+                        <button onclick="copySyncId()" class="text-blue-700 p-2"><i data-lucide="copy" size="20"></i></button>
                     </div>
-
-                    <div class="space-y-2">
-                        <label class="block text-xs font-bold text-gray-400">解読用パスワード</label>
-                        <input type="password" id="cloud-password" class="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="任意のパスワードを設定">
-                    </div>
-
-                    <div class="flex flex-col gap-2">
-                        <button id="btn-cloud-save" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all">
-                            <i data-lucide="cloud-upload"></i> 保存してIDを発行
-                        </button>
-                        <div id="sync-id-display" class="hidden bg-blue-50 border border-blue-100 p-4 rounded-xl flex items-center justify-between">
-                            <div class="flex flex-col">
-                                <span class="text-[10px] text-blue-500 font-bold">共有用ID</span>
-                                <span class="text-lg font-mono font-bold text-blue-900 tracking-wider" id="current-sync-id">----</span>
-                            </div>
-                            <button onclick="copySyncId()" class="bg-blue-200/50 text-blue-700 p-2 rounded-lg hover:bg-blue-200"><i data-lucide="copy" size="20"></i></button>
-                        </div>
-                    </div>
-
-                    <div class="pt-4 border-t border-gray-200">
-                        <label class="block text-xs font-bold text-gray-400 mb-2 tracking-wider uppercase">別の端末から読み込む</label>
-                        <div class="flex flex-col gap-2">
-                            <input type="text" id="sync-id-input" placeholder="共有用ID" class="px-4 py-3 bg-white border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-400 font-mono">
-                            <button id="btn-cloud-load" class="bg-gray-800 text-white py-3 rounded-xl font-bold active:scale-95 transition-all">このIDのデータを読み込む</button>
-                        </div>
+                    <div class="pt-4 border-t border-gray-200 flex flex-col gap-2">
+                        <input type="text" id="sync-id-input" placeholder="共有用ID" class="px-4 py-3 bg-white border border-gray-200 rounded-xl text-sm font-mono uppercase">
+                        <button id="btn-cloud-load" class="bg-gray-800 text-white py-3 rounded-xl font-bold active:scale-95 transition-all">読込実行</button>
                     </div>
                 </div>
-
-                <!-- Backup Section -->
                 <div class="grid grid-cols-2 gap-2">
-                    <button id="btn-export" class="flex items-center justify-center gap-2 bg-white text-gray-700 py-3 rounded-xl border border-gray-200 text-sm font-medium hover:bg-gray-50 transition-colors">
-                        <i data-lucide="download" size="16"></i> バックアップ出力
-                    </button>
-                    <button onclick="document.getElementById('import-file').click()" class="flex items-center justify-center gap-2 bg-white text-gray-700 py-3 rounded-xl border border-gray-200 text-sm font-medium hover:bg-gray-50 transition-colors">
-                        <i data-lucide="upload" size="16"></i> ファイル読込
-                    </button>
+                    <button id="btn-export" class="py-3 rounded-xl border text-sm font-medium bg-white">バックアップ</button>
+                    <button onclick="document.getElementById('import-file').click()" class="py-3 rounded-xl border text-sm font-medium bg-white">読込</button>
                     <input type="file" id="import-file" class="hidden" accept=".json">
                 </div>
-
-                <button id="btn-clear-all" class="w-full flex items-center justify-center gap-2 text-red-400 text-xs font-medium py-2 opacity-50 hover:opacity-100">
-                    <i data-lucide="trash-2" size="14"></i> ローカルのすべてのデータを消去
-                </button>
-
-                <button id="btn-close-config" class="w-full bg-gray-100 text-gray-700 py-4 rounded-xl font-bold mt-2 hover:bg-gray-200 transition-colors">閉じる</button>
+                <!-- エラーの原因となっていた、欠落していたボタンを追加 -->
+                <button id="btn-clear-all" class="w-full text-red-500 text-sm font-medium py-2">すべてのデータを消去</button>
+                <button id="btn-close-config" class="w-full bg-gray-100 py-4 rounded-xl font-bold">閉じる</button>
             </div>
         </div>
     </div>
 
-    <!-- Loading Overlay -->
     <div id="loading" class="fixed inset-0 bg-white/80 z-[3000] hidden flex flex-col items-center justify-center gap-4">
         <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
         <p class="text-blue-600 font-bold" id="loading-text">処理中...</p>
     </div>
 
-    <!-- Firebase SDK & Encryption Logic -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-        // Global State
-        const STORAGE_KEY = 'secure_property_map_v2';
-        let map, canvas, ctx, db, auth, currentUser;
+        const STORAGE_KEY = 'secure_property_map_v3';
+        let map, canvas, ctx, db, auth;
         let mode = 'move';
         let isDrawing = false;
         let currentPath = [];
         let drawings = [];
         let markers = [];
         let pendingLatLng = null;
-        let appId = typeof __app_id !== 'undefined' ? __app_id : 'secure-property-map';
 
-        // Helper: Encryption
+        const getFirebaseConfig = () => {
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) return JSON.parse(__firebase_config);
+            return { apiKey: "YOUR_API_KEY", authDomain: "YOUR_PROJECT.firebaseapp.com", projectId: "YOUR_PROJECT_ID", storageBucket: "YOUR_PROJECT.appspot.com", messagingSenderId: "YOUR_ID", appId: "YOUR_APP_ID" };
+        };
+
         async function encryptData(text, password) {
             const encoder = new TextEncoder();
             const salt = window.crypto.getRandomValues(new Uint8Array(16));
@@ -209,61 +140,56 @@
             const key = await window.crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" }, passwordKey, { name: "AES-GCM", length: 256 }, false, ["encrypt"]);
             const iv = window.crypto.getRandomValues(new Uint8Array(12));
             const encrypted = await window.crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoder.encode(text));
-            return {
-                data: btoa(String.fromCharCode(...new Uint8Array(encrypted))),
-                iv: btoa(String.fromCharCode(...iv)),
-                salt: btoa(String.fromCharCode(...salt))
-            };
+            return { data: btoa(String.fromCharCode(...new Uint8Array(encrypted))), iv: btoa(String.fromCharCode(...iv)), salt: btoa(String.fromCharCode(...salt)) };
         }
 
-        async function decryptData(encryptedObj, password) {
+        async function decryptData(obj, password) {
             const decoder = new TextDecoder();
             const encoder = new TextEncoder();
-            const encrypted = new Uint8Array(atob(encryptedObj.data).split("").map(c => c.charCodeAt(0)));
-            const iv = new Uint8Array(atob(encryptedObj.iv).split("").map(c => c.charCodeAt(0)));
-            const salt = new Uint8Array(atob(encryptedObj.salt).split("").map(c => c.charCodeAt(0)));
+            const encrypted = new Uint8Array(atob(obj.data).split("").map(c => c.charCodeAt(0)));
+            const iv = new Uint8Array(atob(obj.iv).split("").map(c => c.charCodeAt(0)));
+            const salt = new Uint8Array(atob(obj.salt).split("").map(c => c.charCodeAt(0)));
             const passwordKey = await window.crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveKey"]);
             const key = await window.crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" }, passwordKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
             const decrypted = await window.crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, encrypted);
             return decoder.decode(decrypted);
         }
 
-        // Initialize Everything
+        function getWeightForZoom(zoom = map.getZoom()) {
+            const base = 3;
+            if (zoom <= 10) return base * 0.5;
+            if (zoom <= 13) return base;
+            if (zoom <= 15) return base * 1.5;
+            if (zoom <= 17) return base * 2.5;
+            return base * 4;
+        }
+
         async function init() {
-            // Setup UI listeners first so buttons work immediately
+            // DOMが読み込まれてから設定を行う
             setupUI();
 
             try {
-                const firebaseConfig = JSON.parse(__firebase_config);
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-                
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
+                const config = getFirebaseConfig();
+                if (config && config.apiKey !== "YOUR_API_KEY") {
+                    const app = initializeApp(config);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
+                    else await signInAnonymously(auth);
                 }
-                onAuthStateChanged(auth, (user) => { currentUser = user; });
-            } catch (e) {
-                console.warn("Firebase initialization skipped or failed. Cloud sync may be unavailable.", e);
-            }
+            } catch (e) { console.warn("Firebase initialization skipped."); }
 
-            // Map Setup
-            map = L.map('map', { zoomControl: false, tap: false, attributionControl: false, touchZoom: true }).setView([35.6812, 139.7671], 13);
+            map = L.map('map', { zoomControl: false, tap: false, attributionControl: false, touchZoom: true, bounceAtZoomLimits: false }).setView([35.6812, 139.7671], 13);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
             L.control.zoom({ position: 'bottomright' }).addTo(map);
 
             canvas = document.getElementById('drawing-canvas');
             ctx = canvas.getContext('2d');
-            
-            // Fixed: resizeCanvas needs to be defined
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
             
             loadFromLocal();
             
-            // Map Drawing Events
             map.on('mousedown touchstart', (e) => {
                 if (mode !== 'draw') return;
                 if (e.originalEvent.touches && e.originalEvent.touches.length > 1) return;
@@ -271,6 +197,7 @@
                 currentPath = [e.latlng];
                 map.dragging.disable();
                 map.touchZoom.disable();
+                if (e.originalEvent.stopPropagation) e.originalEvent.stopPropagation();
             });
 
             map.on('mousemove touchmove', (e) => {
@@ -283,7 +210,7 @@
             map.on('mouseup touchend', (e) => {
                 if (mode === 'draw') {
                     if (isDrawing && currentPath.length > 1) {
-                        const polyline = L.polyline(currentPath, { color: '#3b82f6', weight: 4, opacity: 0.8 }).addTo(map);
+                        const polyline = L.polyline(currentPath, { color: '#3b82f6', weight: getWeightForZoom(), opacity: 0.8, lineJoin: 'round', lineCap: 'round' }).addTo(map);
                         drawings.push(polyline);
                         saveToLocal();
                     }
@@ -292,6 +219,11 @@
                     map.dragging.enable();
                     map.touchZoom.enable();
                 }
+            });
+
+            map.on('zoomend', () => {
+                const newWeight = getWeightForZoom();
+                drawings.forEach(d => d.setStyle({ weight: newWeight }));
             });
 
             map.on('click', (e) => {
@@ -304,72 +236,58 @@
             lucide.createIcons();
         }
 
-        // Fixed: resizeCanvas function definition
-        function resizeCanvas() {
-            if (canvas) {
-                canvas.width = window.innerWidth;
-                canvas.height = window.innerHeight;
-            }
-        }
+        function resizeCanvas() { if (canvas) { canvas.width = window.innerWidth; canvas.height = window.innerHeight; } }
 
         function setupUI() {
-            document.getElementById('btn-move').onclick = () => setMode('move');
-            document.getElementById('btn-draw').onclick = () => setMode('draw');
-            document.getElementById('btn-marker').onclick = () => setMode('marker');
-            document.getElementById('btn-undo').onclick = undoLastAction;
-            
-            // Config modal opening
-            document.getElementById('btn-config').onclick = () => {
-                document.getElementById('config-modal').classList.remove('hidden');
+            const elements = {
+                'btn-move': () => setMode('move'),
+                'btn-draw': () => setMode('draw'),
+                'btn-marker': () => setMode('marker'),
+                'btn-undo': undoLastAction,
+                'btn-config': () => document.getElementById('config-modal').classList.remove('hidden'),
+                'btn-close-config': () => document.getElementById('config-modal').classList.add('hidden'),
+                'btn-clear-all': clearAll,
+                'btn-export': exportData,
+                'btn-cloud-save': cloudSave,
+                'btn-cloud-load': cloudLoad,
+                'btn-cancel-prop': () => document.getElementById('property-modal').classList.add('hidden'),
+                'btn-save-prop': saveMarker,
+                'btn-search': search
             };
-            document.getElementById('btn-close-config').onclick = () => {
-                document.getElementById('config-modal').classList.add('hidden');
-            };
-            
-            document.getElementById('btn-clear-all').onclick = clearAll;
-            document.getElementById('btn-export').onclick = exportData;
-            document.getElementById('btn-cloud-save').onclick = cloudSave;
-            document.getElementById('btn-cloud-load').onclick = cloudLoad;
 
-            document.getElementById('import-file').onchange = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                    try {
-                        const data = JSON.parse(ev.target.result);
-                        applyMapData(data);
-                        saveToLocal();
-                        showToast("読み込みました");
-                    } catch (e) { showToast("無効なファイルです"); }
+            for (const [id, action] of Object.entries(elements)) {
+                const el = document.getElementById(id);
+                if (el) el.onclick = action;
+            }
+
+            const importFile = document.getElementById('import-file');
+            if (importFile) {
+                importFile.onchange = (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => { applyMapData(JSON.parse(ev.target.result)); saveToLocal(); };
+                    reader.readAsText(file);
                 };
-                reader.readAsText(file);
-            };
-
-            document.getElementById('btn-cancel-prop').onclick = () => document.getElementById('property-modal').classList.add('hidden');
-            document.getElementById('btn-save-prop').onclick = saveMarker;
-            document.getElementById('btn-search').onclick = search;
-            document.getElementById('search-input').onkeypress = (e) => { if (e.key === 'Enter') search(); };
+            }
         }
 
         function setMode(m) {
             mode = m;
             ['btn-move', 'btn-draw', 'btn-marker'].forEach(id => {
                 const btn = document.getElementById(id);
+                if (!btn) return;
                 const active = id === `btn-${m}`;
-                btn.classList.toggle('bg-blue-500', active);
-                btn.classList.toggle('text-white', active);
-                btn.classList.toggle('bg-white', !active);
-                btn.classList.toggle('text-gray-700', !active);
+                btn.classList.toggle('bg-blue-500', active); btn.classList.toggle('text-white', active);
+                btn.classList.toggle('bg-white', !active); btn.classList.toggle('text-gray-700', !active);
             });
-            map.dragging.enable();
-            map.touchZoom.enable();
+            map.dragging.enable(); map.touchZoom.enable();
         }
 
         function drawTempPath() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             if (currentPath.length < 2) return;
-            ctx.beginPath(); ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+            ctx.beginPath(); ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = getWeightForZoom(); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
             const start = map.latLngToContainerPoint(currentPath[0]);
             ctx.moveTo(start.x, start.y);
             for (let i = 1; i < currentPath.length; i++) {
@@ -390,17 +308,12 @@
                 saveToLocal();
             }
             document.getElementById('property-modal').classList.add('hidden');
-            document.getElementById('prop-name').value = '';
-            document.getElementById('prop-url').value = '';
+            document.getElementById('prop-name').value = ''; document.getElementById('prop-url').value = '';
             setMode('move');
         }
 
         function createMarker(latlng, name, url) {
-            const popup = `<div class="p-2 min-w-[150px]">
-                <h4 class="font-bold text-gray-800 border-b pb-1 mb-2">${name}</h4>
-                ${url ? `<a href="${url}" target="_blank" class="text-blue-500 underline text-sm flex items-center gap-1">物件詳細 <i data-lucide="external-link" size="14"></i></a>` : '<p class="text-xs text-gray-400">URLなし</p>'}
-                <button onclick="window.removeAt('${latlng.lat}', '${latlng.lng}')" class="mt-4 text-red-400 text-xs flex items-center gap-1">削除</button>
-            </div>`;
+            const popup = `<div class="p-2 min-w-[150px]"><h4 class="font-bold text-gray-800 border-b pb-1 mb-2">${name}</h4>${url ? `<a href="${url}" target="_blank" class="text-blue-500 text-sm">物件詳細</a>` : '<p class="text-xs">URLなし</p>'}<button onclick="window.removeAt('${latlng.lat}', '${latlng.lng}')" class="mt-4 text-red-400 text-xs">削除</button></div>`;
             const m = L.marker(latlng).addTo(map).bindPopup(popup);
             m.on('popupopen', () => lucide.createIcons());
             return m;
@@ -425,24 +338,20 @@
 
         function clearAll() {
             if (!confirm("すべて削除しますか？")) return;
-            drawings.forEach(d => map.removeLayer(d));
-            markers.forEach(m => map.removeLayer(m.instance));
-            drawings = []; markers = [];
-            saveToLocal();
+            drawings.forEach(d => map.removeLayer(d)); markers.forEach(m => map.removeLayer(m.instance));
+            drawings = []; markers = []; saveToLocal();
             document.getElementById('config-modal').classList.add('hidden');
         }
 
-        function getMapState() {
-            return { drawings: drawings.map(d => d.getLatLngs()), markers: markers.map(m => ({ latlng: m.latlng, name: m.name, url: m.url })), center: map.getCenter(), zoom: map.getZoom() };
-        }
+        function getMapState() { return { drawings: drawings.map(d => d.getLatLngs()), markers: markers.map(m => ({ latlng: m.latlng, name: m.name, url: m.url })), center: map.getCenter(), zoom: map.getZoom() }; }
 
         function applyMapData(data) {
             if (!data) return;
-            drawings.forEach(d => map.removeLayer(d));
-            markers.forEach(m => map.removeLayer(m.instance));
+            drawings.forEach(d => map.removeLayer(d)); markers.forEach(m => map.removeLayer(m.instance));
             drawings = []; markers = [];
             if (data.center) map.setView(data.center, data.zoom);
-            if (data.drawings) data.drawings.forEach(p => drawings.push(L.polyline(p, { color: '#3b82f6', weight: 4, opacity: 0.8 }).addTo(map)));
+            const weight = getWeightForZoom();
+            if (data.drawings) data.drawings.forEach(p => drawings.push(L.polyline(p, { color: '#3b82f6', weight: weight, opacity: 0.8, lineJoin: 'round', lineCap: 'round' }).addTo(map)));
             if (data.markers) data.markers.forEach(m => markers.push({ ...m, instance: createMarker(m.latlng, m.name, m.url) }));
         }
 
@@ -458,44 +367,39 @@
         async function cloudSave() {
             const pw = document.getElementById('cloud-password').value;
             if (!pw || pw.length < 4) return showToast("4文字以上のパスワードを設定してください");
-            if (!db) return showToast("クラウド機能が利用できません");
-
-            const loading = document.getElementById('loading');
-            loading.classList.remove('hidden');
+            if (!db) return showToast("クラウド設定が必要です");
+            document.getElementById('loading').classList.remove('hidden');
             try {
                 const encrypted = await encryptData(JSON.stringify(getMapState()), pw);
                 const syncId = Math.random().toString(36).substring(2, 10).toUpperCase();
-                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sharedMaps', syncId), { encryptedData: encrypted, createdAt: Date.now(), secure: true });
+                const aid = typeof __app_id !== 'undefined' ? __app_id : 'my-property-map';
+                await setDoc(doc(db, 'artifacts', aid, 'public', 'data', 'sharedMaps', syncId), { encryptedData: encrypted, createdAt: Date.now(), secure: true });
                 document.getElementById('sync-id-display').classList.remove('hidden');
                 document.getElementById('current-sync-id').textContent = syncId;
-                showToast("暗号化して保存しました");
-            } catch (e) { showToast("保存失敗"); } finally { loading.classList.add('hidden'); }
+                showToast("暗号化保存成功");
+            } catch (e) { showToast("保存失敗"); } finally { document.getElementById('loading').classList.add('hidden'); }
         }
 
         async function cloudLoad() {
             const id = document.getElementById('sync-id-input').value.trim().toUpperCase();
             const pw = document.getElementById('cloud-password').value;
             if (!id || !pw) return showToast("IDとパスワードが必要です");
-            if (!db) return showToast("クラウド機能が利用できません");
-
-            const loading = document.getElementById('loading');
-            loading.classList.remove('hidden');
+            if (!db) return showToast("クラウド設定が必要です");
+            document.getElementById('loading').classList.remove('hidden');
             try {
-                const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sharedMaps', id));
+                const aid = typeof __app_id !== 'undefined' ? __app_id : 'my-property-map';
+                const snap = await getDoc(doc(db, 'artifacts', aid, 'public', 'data', 'sharedMaps', id));
                 if (snap.exists()) {
                     const decrypted = await decryptData(snap.data().encryptedData, pw);
-                    applyMapData(JSON.parse(decrypted));
-                    saveToLocal();
-                    showToast("同期完了");
-                    document.getElementById('config-modal').classList.add('hidden');
-                } else { showToast("IDが見つかりません"); }
-            } catch (e) { showToast("解読失敗: パスワードを確認してください"); } finally { loading.classList.add('hidden'); }
+                    applyMapData(JSON.parse(decrypted)); saveToLocal();
+                    showToast("同期完了"); document.getElementById('config-modal').classList.add('hidden');
+                } else { showToast("ID不正"); }
+            } catch (e) { showToast("解読失敗"); } finally { document.getElementById('loading').classList.add('hidden'); }
         }
 
         window.copySyncId = () => {
             const id = document.getElementById('current-sync-id').textContent;
-            const el = document.createElement('textarea'); el.value = id; document.body.appendChild(el); el.select(); document.execCommand('copy'); document.body.removeChild(el);
-            showToast("IDをコピーしました");
+            navigator.clipboard.writeText(id).then(() => showToast("コピーしました"));
         };
 
         function showToast(msg) {
@@ -505,6 +409,7 @@
             setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 500); }, 3000);
         }
 
+        // 初期化実行
         init();
     </script>
 </body>
