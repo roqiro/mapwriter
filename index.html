@@ -17,34 +17,42 @@
 
     <style>
         body, html { height: 100%; margin: 0; overflow: hidden; background: #000; overscroll-behavior: none; }
-        #map { height: 100%; width: 100%; z-index: 1; touch-action: none; outline: none; -webkit-tap-highlight-color: transparent; }
+        #map { height: 100%; width: 100%; z-index: 1; outline: none; -webkit-tap-highlight-color: transparent; }
+        
+        /* キャンバスのスタイル調整: touch-action: none でブラウザのスクロールを無効化 */
         .canvas-overlay {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
-            z-index: 2; pointer-events: none; touch-action: none;
+            z-index: 10; /* 地図より上 */
+            touch-action: none; /* 重要: ブラウザのデフォルト動作を無効化 */
+            pointer-events: none; /* 初期状態はイベントを通す */
         }
+        
         .leaflet-container { background: #f0f0f0; }
-        .ui-panel { z-index: 1000; padding-top: env(safe-area-inset-top, 20px); }
+        
+        /* UIパネルはキャンバスよりさらに上 */
+        .ui-panel { z-index: 1000; padding-top: env(safe-area-inset-top, 20px); pointer-events: none; }
+        /* ボタンなどはイベントを受け取る */
+        .ui-panel button, .ui-panel input { pointer-events: auto; }
+        
         #property-modal, #config-modal { z-index: 2000; }
         .leaflet-control-attribution { display: none !important; }
         .modal-enter { animation: modalFadeIn 0.2s ease-out; }
         @keyframes modalFadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
         button { cursor: pointer; touch-action: manipulation; }
         
-        /* カスタムピン用スタイル */
         .custom-pin { background: transparent; border: none; }
         .star-btn.active svg { fill: #fbbf24; color: #fbbf24; }
         
-        /* ツールバーの横スクロール対応（画面が狭い場合） */
         .toolbar-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
         .toolbar-scroll::-webkit-scrollbar { display: none; }
     </style>
 </head>
 <body class="bg-gray-100">
 
-    <div class="ui-panel fixed top-0 left-4 right-4 flex flex-col gap-2 pointer-events-none mt-4">
+    <div class="ui-panel fixed top-0 left-4 right-4 flex flex-col gap-2 mt-4">
         <div class="flex justify-between items-start">
-            <div class="flex flex-col gap-2 pointer-events-auto max-w-full">
+            <div class="flex flex-col gap-2 max-w-full">
                 <div class="bg-white/90 backdrop-blur-md p-2 rounded-2xl shadow-xl flex gap-1 md:gap-2 border border-white/20 toolbar-scroll">
                     <button id="btn-move" class="p-3 rounded-xl bg-blue-500 text-white shadow-sm transition-all active:scale-90 flex-shrink-0" title="移動">
                         <i data-lucide="move"></i>
@@ -79,7 +87,7 @@
                     </button>
                 </div>
             </div>
-            <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-xl flex items-center p-1 pointer-events-auto w-48 md:w-80 border border-white/20 ml-2">
+            <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-xl flex items-center p-1 w-48 md:w-80 border border-white/20 ml-2">
                 <input type="text" id="search-input" placeholder="駅、住所を検索..." class="flex-1 px-4 py-2 bg-transparent outline-none text-sm min-w-0">
                 <button id="btn-search" class="p-2 text-gray-500 hover:text-blue-500 flex-shrink-0"><i data-lucide="search"></i></button>
             </div>
@@ -158,7 +166,7 @@
         let mode = 'move';
         let currentColor = '#3b82f6'; // デフォルト青
         let isDrawing = false;
-        let currentPath = [];
+        let currentPath = []; // 緯度経度の配列ではなく、ピクセル座標の一時保存用
         let drawings = [];
         let markers = [];
         let pendingLatLng = null;
@@ -232,43 +240,19 @@
             
             loadFromLocal();
             
-            map.on('mousedown touchstart', (e) => {
-                if (mode !== 'draw') return;
-                if (e.originalEvent.touches && e.originalEvent.touches.length > 1) return;
-                
-                if (e.originalEvent.cancelable) e.originalEvent.preventDefault();
-                if (e.originalEvent.stopPropagation) e.originalEvent.stopPropagation();
-
-                isDrawing = true;
-                currentPath = [e.latlng];
-            });
-
-            map.on('mousemove touchmove', (e) => {
-                if (!isDrawing || mode !== 'draw') return;
-                
-                if (e.originalEvent.cancelable) e.originalEvent.preventDefault();
-                if (e.originalEvent.stopPropagation) e.originalEvent.stopPropagation();
-
-                currentPath.push(e.latlng);
-                drawTempPath();
-            });
-
-            map.on('mouseup touchend', (e) => {
-                if (mode === 'draw' && isDrawing) {
-                    if (currentPath.length > 1) {
-                        createPolyline(currentPath, currentColor);
-                        saveToLocal();
-                    }
-                    isDrawing = false;
-                    clearCanvas();
-                }
-            });
+            // iPad/Apple Pencil対応のためのPointer Events実装
+            // Leafletのイベントではなく、Canvasに対する直接のイベントリスナーを使用する
+            canvas.addEventListener('pointerdown', handlePointerDown, { passive: false });
+            canvas.addEventListener('pointermove', handlePointerMove, { passive: false });
+            canvas.addEventListener('pointerup', handlePointerUp, { passive: false });
+            canvas.addEventListener('pointercancel', handlePointerUp, { passive: false });
 
             map.on('zoomend', () => {
                 const newWeight = getWeightForZoom();
                 drawings.forEach(d => d.instance.setStyle({ weight: newWeight }));
             });
 
+            // マーカー配置モード用
             map.on('click', (e) => {
                 if (mode === 'marker') {
                     pendingLatLng = e.latlng;
@@ -281,6 +265,55 @@
             setMode('move'); // 初期モード
         }
 
+        // --- Pointer Event Handlers for Drawing ---
+        function handlePointerDown(e) {
+            if (mode !== 'draw') return;
+            e.preventDefault(); // デフォルトのタッチアクション（スクロール等）を無効化
+            isDrawing = true;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            currentPath = [{x, y}];
+            
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.strokeStyle = currentColor;
+            ctx.lineWidth = getWeightForZoom();
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+        }
+
+        function handlePointerMove(e) {
+            if (!isDrawing || mode !== 'draw') return;
+            e.preventDefault();
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            currentPath.push({x, y});
+            
+            ctx.lineTo(x, y);
+            ctx.stroke();
+        }
+
+        function handlePointerUp(e) {
+            if (!isDrawing || mode !== 'draw') return;
+            e.preventDefault();
+            isDrawing = false;
+            
+            if (currentPath.length > 1) {
+                // ピクセル座標を緯度経度に変換
+                const latLngs = currentPath.map(p => map.containerPointToLatLng([p.x, p.y]));
+                createPolyline(latLngs, currentColor);
+                saveToLocal();
+            }
+            clearCanvas();
+            currentPath = [];
+        }
+
         function createPolyline(path, color) {
             const polyline = L.polyline(path, { 
                 color: color, 
@@ -288,13 +321,13 @@
                 opacity: 0.8, 
                 lineJoin: 'round', 
                 lineCap: 'round',
-                className: 'drawable-path' // クラスを追加して識別しやすく
+                className: 'drawable-path' 
             }).addTo(map);
 
-            // 消しゴム機能：クリック（タップ）で削除
+            // 消しゴム機能
             polyline.on('click', (e) => {
                 if (mode === 'eraser') {
-                    L.DomEvent.stopPropagation(e); // 地図へのクリック伝播を防ぐ
+                    L.DomEvent.stopPropagation(e);
                     removeDrawing(polyline);
                 }
             });
@@ -369,13 +402,11 @@
             mode = m;
             if (color) currentColor = color;
 
-            // ボタンのアクティブ状態リセット
             const btns = ['btn-move', 'btn-draw-blue', 'btn-draw-red', 'btn-eraser', 'btn-marker'];
             btns.forEach(id => {
                 const btn = document.getElementById(id);
                 if (!btn) return;
                 
-                // 現在のモードとIDが一致するか、または描画モードの場合は色もチェック
                 let isActive = false;
                 if (m === 'draw') {
                     if (id === 'btn-draw-blue' && currentColor === '#3b82f6') isActive = true;
@@ -387,7 +418,6 @@
                 if (isActive) {
                     btn.classList.add('bg-blue-500', 'text-white');
                     btn.classList.remove('bg-white', 'text-gray-700');
-                    // 赤ペンの場合だけ背景を赤にするなどの調整も可能だが、統一感のため青背景（アクティブ）とする
                     if (id === 'btn-draw-red') {
                         btn.classList.remove('bg-blue-500');
                         btn.classList.add('bg-red-500');
@@ -402,50 +432,25 @@
                 }
             });
 
-            // 地図操作のロック制御
+            // モード切り替えロジックの改善
+            // drawモード時はCanvasが全てのイベントを受け取る (pointer-events: auto)
+            // それ以外は地図がイベントを受け取る (pointer-events: none)
             if (mode === 'draw') {
-                disableMapInteraction();
+                canvas.style.pointerEvents = 'auto'; 
                 document.getElementById('map').style.cursor = 'crosshair';
-            } else if (mode === 'eraser') {
-                enableMapInteraction(); // 消しゴムモードは移動しながら探せるように移動許可
-                document.getElementById('map').style.cursor = 'not-allowed'; // 消しゴムっぽいカーソル表現
             } else {
-                enableMapInteraction();
-                document.getElementById('map').style.cursor = 'grab';
+                canvas.style.pointerEvents = 'none'; 
+                if (mode === 'eraser') {
+                    document.getElementById('map').style.cursor = 'not-allowed';
+                } else {
+                    document.getElementById('map').style.cursor = 'grab';
+                }
             }
-        }
-
-        function disableMapInteraction() {
-            map.dragging.disable();
-            map.touchZoom.disable();
-            map.doubleClickZoom.disable();
-            map.scrollWheelZoom.disable();
-            map.boxZoom.disable();
-            map.keyboard.disable();
-            if (map.tap) map.tap.disable();
-        }
-
-        function enableMapInteraction() {
-            map.dragging.enable();
-            map.touchZoom.enable();
-            map.doubleClickZoom.enable();
-            map.scrollWheelZoom.enable();
-            map.boxZoom.enable();
-            map.keyboard.enable();
-            if (map.tap) map.tap.enable();
         }
 
         function drawTempPath() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            if (currentPath.length < 2) return;
-            ctx.beginPath(); ctx.strokeStyle = currentColor; ctx.lineWidth = getWeightForZoom(); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-            const start = map.latLngToContainerPoint(currentPath[0]);
-            ctx.moveTo(start.x, start.y);
-            for (let i = 1; i < currentPath.length; i++) {
-                const p = map.latLngToContainerPoint(currentPath[i]);
-                ctx.lineTo(p.x, p.y);
-            }
-            ctx.stroke();
+            // Pointer Eventハンドラ内で描画するため、この関数は使用しませんが、
+            // 互換性維持のため残すか、削除しても良いです。今回は削除します。
         }
 
         function clearCanvas() { ctx.clearRect(0, 0, canvas.width, canvas.height); }
@@ -538,7 +543,6 @@
             
             if (data.drawings) {
                 data.drawings.forEach(d => {
-                    // 旧データ形式対応 (配列のみの場合とオブジェクトの場合)
                     const path = Array.isArray(d) ? d : d.latlngs;
                     const color = d.color || '#3b82f6';
                     createPolyline(path, color);
@@ -605,4 +609,3 @@
     </script>
 </body>
 </html>
-
