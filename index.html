@@ -100,7 +100,7 @@
     <!-- Modals -->
     <div id="property-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
         <div class="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl modal-enter">
-            <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-gray-800"><i data-lucide="home" class="text-blue-500"></i> 物件登録</h3>
+            <h3 id="modal-title" class="text-xl font-bold mb-4 flex items-center gap-2 text-gray-800"><i data-lucide="home" class="text-blue-500"></i> 物件登録</h3>
             <div class="space-y-4">
                 <input type="text" id="prop-name" class="w-full px-4 py-3 bg-gray-50 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="物件名 / メモ">
                 
@@ -170,6 +170,7 @@
         let drawings = [];
         let markers = [];
         let pendingLatLng = null;
+        let pendingMarker = null; // 編集中のマーカー
         let currentRating = 3;
 
         const getFirebaseConfig = () => {
@@ -200,12 +201,15 @@
         }
 
         function getWeightForZoom(zoom = map.getZoom()) {
-            const base = 3;
-            if (zoom <= 10) return base * 0.5;
-            if (zoom <= 13) return base;
-            if (zoom <= 15) return base * 1.5;
-            if (zoom <= 17) return base * 2.5;
-            return base * 4;
+            const base = 1.5; // ペンの太さを調整 (3 -> 1.5)
+            let w;
+            if (zoom <= 10) w = base * 0.8;
+            else if (zoom <= 13) w = base;
+            else if (zoom <= 15) w = base * 1.8;
+            else if (zoom <= 17) w = base * 3;
+            else w = base * 5;
+            
+            return Math.max(1, w); // 最低1pxは保証
         }
 
         async function init() {
@@ -241,11 +245,24 @@
             loadFromLocal();
             
             // iPad/Apple Pencil対応のためのPointer Events実装
-            // Leafletのイベントではなく、Canvasに対する直接のイベントリスナーを使用する
             canvas.addEventListener('pointerdown', handlePointerDown, { passive: false });
             canvas.addEventListener('pointermove', handlePointerMove, { passive: false });
             canvas.addEventListener('pointerup', handlePointerUp, { passive: false });
             canvas.addEventListener('pointercancel', handlePointerUp, { passive: false });
+
+            // ★追加: マルチタッチ（2本指以上）検知で移動モードへ自動切替
+            canvas.addEventListener('touchstart', (e) => {
+                if (mode === 'draw' && e.touches.length >= 2) {
+                    // 描画をキャンセル
+                    isDrawing = false;
+                    currentPath = [];
+                    clearCanvas();
+                    
+                    // 移動モードへ
+                    setMode('move');
+                    showToast("移動モードに切り替えました");
+                }
+            }, { passive: true });
 
             map.on('zoomend', () => {
                 const newWeight = getWeightForZoom();
@@ -256,8 +273,11 @@
             map.on('click', (e) => {
                 if (mode === 'marker') {
                     pendingLatLng = e.latlng;
+                    pendingMarker = null; // 新規作成なので編集対象はnull
                     resetRating(); 
+                    document.getElementById('modal-title').innerHTML = '<i data-lucide="home" class="text-blue-500"></i> 物件登録';
                     document.getElementById('property-modal').classList.remove('hidden');
+                    lucide.createIcons();
                 }
             });
             
@@ -267,8 +287,10 @@
 
         // --- Pointer Event Handlers for Drawing ---
         function handlePointerDown(e) {
-            // 消しゴムモードもCanvasでイベントを処理する
             if (mode !== 'draw' && mode !== 'eraser') return;
+            // マルチタッチ（ピンチ操作など）の誤反応防止。ペンや指の1本目だけ反応する。
+            if (!e.isPrimary) return; 
+
             e.preventDefault(); 
             isDrawing = true;
             
@@ -277,7 +299,6 @@
             const y = e.clientY - rect.top;
 
             if (mode === 'eraser') {
-                // タップした瞬間も消す
                 eraseAt(x, y);
             } else {
                 currentPath = [{x, y}];
@@ -292,6 +313,8 @@
 
         function handlePointerMove(e) {
             if (!isDrawing || (mode !== 'draw' && mode !== 'eraser')) return;
+            if (!e.isPrimary) return; // マルチタッチ防止
+
             e.preventDefault();
             
             const rect = canvas.getBoundingClientRect();
@@ -299,7 +322,6 @@
             const y = e.clientY - rect.top;
 
             if (mode === 'eraser') {
-                // なぞって消す
                 eraseAt(x, y);
             } else {
                 currentPath.push({x, y});
@@ -310,11 +332,12 @@
 
         function handlePointerUp(e) {
             if (!isDrawing || (mode !== 'draw' && mode !== 'eraser')) return;
+            if (!e.isPrimary) return; 
+
             e.preventDefault();
             isDrawing = false;
             
             if (mode === 'draw' && currentPath.length > 1) {
-                // ピクセル座標を緯度経度に変換
                 const latLngs = currentPath.map(p => map.containerPointToLatLng([p.x, p.y]));
                 createPolyline(latLngs, currentColor);
                 saveToLocal();
@@ -323,18 +346,13 @@
             currentPath = [];
         }
 
-        // 指定座標付近のオブジェクトを削除する関数
         function eraseAt(x, y) {
-            const threshold = 25; // 削除判定の半径(px)
+            const threshold = 25; 
 
-            // 1. 線の削除判定
-            // 逆ループで安全に削除
             for (let i = drawings.length - 1; i >= 0; i--) {
                 const d = drawings[i];
                 const latLngs = d.instance.getLatLngs();
                 
-                // 簡易判定: 線を構成する点との距離が近いか
-                // 本来は線分との距離を見るべきだが、手書き線は点が密なので点間距離で十分機能する
                 let hit = false;
                 for (const ll of latLngs) {
                     const p = map.latLngToContainerPoint(ll);
@@ -349,8 +367,6 @@
                     drawings.splice(i, 1);
                     saveToLocal();
                     
-                    // 視覚的なフィードバック（消した場所に白い円を一瞬出すなど）があると良いが、
-                    // ここではシンプルにCanvasに「消しゴム軌跡」を表示
                     ctx.save();
                     ctx.globalCompositeOperation = 'destination-out';
                     ctx.beginPath();
@@ -360,13 +376,10 @@
                 }
             }
 
-            // 2. マーカーの削除判定
             for (let i = markers.length - 1; i >= 0; i--) {
                 const m = markers[i];
                 const p = map.latLngToContainerPoint(m.latlng);
-                // マーカーはアイコンが大きいので判定は中心点ではなくアイコン領域全体をカバーしたいが、
-                // 簡易的に中心からの距離で判定（少し広めに）
-                if (Math.hypot(p.x - x, p.y - 40 + 20) < 40) { // アイコンの見た目の中心付近
+                if (Math.hypot(p.x - x, p.y - 40 + 20) < 40) {
                     map.removeLayer(m.instance);
                     markers.splice(i, 1);
                     saveToLocal();
@@ -384,7 +397,6 @@
                 className: 'drawable-path' 
             }).addTo(map);
 
-            // 念のためクリックイベントも残すが、主な削除はeraseAtで行う
             polyline.on('click', (e) => {
                 if (mode === 'eraser') {
                     L.DomEvent.stopPropagation(e);
@@ -492,14 +504,10 @@
                 }
             });
 
-            // モード切り替えロジック
-            // drawモードとeraserモードはCanvasが全てのイベントを受け取る (pointer-events: auto)
-            // これにより、消しゴム使用中も地図が動かず、なぞって消す操作が可能になる
             if (mode === 'draw' || mode === 'eraser') {
                 canvas.style.pointerEvents = 'auto'; 
                 
                 if (mode === 'eraser') {
-                    // 消しゴムっぽいカーソル（円形が望ましいがCSS標準にはないので近似）
                     document.getElementById('map').style.cursor = 'cell'; 
                 } else {
                     document.getElementById('map').style.cursor = 'crosshair';
@@ -510,21 +518,34 @@
             }
         }
 
-        function drawTempPath() {
-            // Pointer Eventハンドラ内で描画するため、この関数は使用しませんが、
-            // 互換性維持のため残すか、削除しても良いです。今回は削除します。
-        }
+        function drawTempPath() {}
 
         function clearCanvas() { ctx.clearRect(0, 0, canvas.width, canvas.height); }
 
         function saveMarker() {
             const name = document.getElementById('prop-name').value || '無題の物件';
             const url = document.getElementById('prop-url').value;
-            if (pendingLatLng) {
+            
+            if (pendingMarker) {
+                // 既存マーカーの更新
+                pendingMarker.name = name;
+                pendingMarker.url = url;
+                pendingMarker.rating = currentRating;
+                
+                // アイコンとポップアップの更新
+                pendingMarker.instance.setIcon(getPinIcon(currentRating));
+                const newPopupContent = generatePopupContent(pendingMarker.latlng, name, url, currentRating);
+                pendingMarker.instance.setPopupContent(newPopupContent);
+                
+                saveToLocal();
+                pendingMarker = null; // リセット
+            } else if (pendingLatLng) {
+                // 新規マーカーの作成
                 const marker = createMarker(pendingLatLng, name, url, currentRating);
                 markers.push({ latlng: pendingLatLng, name, url, rating: currentRating, instance: marker });
                 saveToLocal();
             }
+            
             document.getElementById('property-modal').classList.add('hidden');
             document.getElementById('prop-name').value = ''; document.getElementById('prop-url').value = '';
             setMode('move');
@@ -536,27 +557,59 @@
             const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="${c}" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.3));"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3" fill="white"/></svg>`;
             return L.divIcon({ className: 'custom-pin', html: svg, iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] });
         }
+        
+        // ポップアップのHTML生成を関数化して編集時にも再利用できるようにする
+        function generatePopupContent(latlng, name, url, rating) {
+            const stars = "★".repeat(rating) + "☆".repeat(5 - rating);
+            return `
+                <div class="p-2 min-w-[160px]">
+                    <h4 class="font-bold text-gray-800 border-b pb-1 mb-2 text-base">${name}</h4>
+                    <div class="text-yellow-500 text-sm mb-3 tracking-widest">${stars}</div>
+                    ${url ? `<a href="${url}" target="_blank" class="text-blue-500 text-sm flex items-center gap-1 mb-3"><i data-lucide="external-link" size="14"></i> 物件詳細</a>` : '<p class="text-xs text-gray-400 mb-3">URLなし</p>'}
+                    <div class="flex gap-2">
+                        <button onclick="window.editMarker('${latlng.lat}', '${latlng.lng}')" class="flex-1 text-center py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 transition-colors font-bold">編集</button>
+                        <button onclick="window.removeAt('${latlng.lat}', '${latlng.lng}')" class="flex-1 text-center py-1.5 bg-red-50 text-red-500 text-xs rounded hover:bg-red-100 transition-colors font-bold">削除</button>
+                    </div>
+                </div>`;
+        }
 
         function createMarker(latlng, name, url, rating = 3) {
-            const stars = "★".repeat(rating) + "☆".repeat(5 - rating);
-            const popup = `<div class="p-2 min-w-[150px]"><h4 class="font-bold text-gray-800 border-b pb-1 mb-2">${name}</h4><div class="text-yellow-500 text-sm mb-2 tracking-widest">${stars}</div>${url ? `<a href="${url}" target="_blank" class="text-blue-500 text-sm flex items-center gap-1"><i data-lucide="external-link" size="14"></i> 物件詳細</a>` : '<p class="text-xs text-gray-400">URLなし</p>'}<button onclick="window.removeAt('${latlng.lat}', '${latlng.lng}')" class="mt-4 w-full text-center py-1 text-red-400 text-xs border border-red-100 rounded hover:bg-red-50">削除</button></div>`;
-            
+            const popup = generatePopupContent(latlng, name, url, rating);
             const m = L.marker(latlng, { icon: getPinIcon(rating) }).addTo(map).bindPopup(popup);
             m.on('popupopen', () => lucide.createIcons());
             
-            // 消しゴム機能：クリック（タップ）で削除（バックアップ）
             m.on('click', (e) => {
                 if (mode === 'eraser') {
-                    // ポップアップを開かせない
                     e.target.closePopup();
                     e.originalEvent.preventDefault();
                     e.originalEvent.stopPropagation();
-                    window.removeAt(latlng.lat, latlng.lng); // 既存の削除関数を利用
+                    window.removeAt(latlng.lat, latlng.lng);
                 }
             });
 
             return m;
         }
+        
+        // 編集機能の実装
+        window.editMarker = (lat, lng) => {
+            const target = markers.find(m => m.latlng.lat == lat && m.latlng.lng == lng);
+            if (!target) return;
+            
+            pendingMarker = target; // 編集対象を保存
+            
+            // モーダルに現在の値をセット
+            document.getElementById('prop-name').value = target.name;
+            document.getElementById('prop-url').value = target.url || '';
+            setRating(target.rating || 3);
+            
+            // モーダル表示
+            document.getElementById('modal-title').innerHTML = '<i data-lucide="edit" class="text-blue-500"></i> 物件情報の編集';
+            document.getElementById('property-modal').classList.remove('hidden');
+            lucide.createIcons();
+            
+            // ポップアップを閉じる
+            map.closePopup();
+        };
 
         window.removeAt = (lat, lng) => {
             const idx = markers.findIndex(m => m.latlng.lat == lat && m.latlng.lng == lng);
@@ -569,8 +622,24 @@
             try {
                 const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`);
                 const d = await res.json();
-                if (d[0]) map.setView([d[0].lat, d[0].lon], 15);
-            } catch (e) {}
+                if (d && d.length > 0) {
+                    const place = d[0];
+                    // バウンディングボックス（範囲）がある場合はそれに合わせてズーム
+                    if (place.boundingbox) {
+                        const southWest = [place.boundingbox[0], place.boundingbox[2]];
+                        const northEast = [place.boundingbox[1], place.boundingbox[3]];
+                        map.fitBounds([southWest, northEast], { padding: [50, 50] }); // 少し余白を持たせる
+                    } else {
+                        // 範囲がない場合は中心点に移動してズーム（強めに）
+                        map.setView([place.lat, place.lon], 17);
+                    }
+                } else {
+                    showToast("場所が見つかりませんでした");
+                }
+            } catch (e) {
+                console.error(e);
+                showToast("検索中にエラーが発生しました");
+            }
         }
 
         function undoLastAction() { 
